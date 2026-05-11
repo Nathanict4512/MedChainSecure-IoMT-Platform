@@ -385,7 +385,7 @@ RELAY_SCRIPT = """
 </script>
 """
 
-
+DB_PATH = Path("/tmp/heart_monitor.db").resolve()   # /tmp is usually writable
 # ── Database ───────────────────────────────────────────────────────────────────
 def init_db():
     conn = sqlite3.connect('heart_monitor.db')
