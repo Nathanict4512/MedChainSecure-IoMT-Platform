@@ -9,6 +9,7 @@
 #   Streamlit   →  st.query_params picks up the values on the next rerun
 
 import streamlit as st
+import streamlit.components.v1 as components
 import sqlite3
 import hashlib
 import json
@@ -21,7 +22,6 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import bcrypt
-from pathlib import Path
 
 st.set_page_config(
     page_title="MedChainSecure - rPPG Heart Monitor",
@@ -387,69 +387,35 @@ RELAY_SCRIPT = """
 
 
 # ── Database ───────────────────────────────────────────────────────────────────
-DB_PATH = Path("heart_monitor.db").resolve()
-
 def init_db():
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        c = conn.cursor()
-        
-        # Users table
-        c.execute('''CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            full_name TEXT NOT NULL,
-            age INTEGER,
-            gender TEXT,
-            is_admin BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        
-        # Test results
-        c.execute('''CREATE TABLE IF NOT EXISTS test_results(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            bpm INTEGER NOT NULL,
-            quality REAL NOT NULL,
-            encrypted_hex TEXT NOT NULL,
-            key_hex TEXT NOT NULL,
-            ecc_public_key TEXT,
-            blockchain_hash TEXT,
-            test_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        
-        # Audit log
-        c.execute('''CREATE TABLE IF NOT EXISTS audit_log(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            action TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            details TEXT,
-            previous_hash TEXT,
-            current_hash TEXT)''')
-        
-        # Create default admin if not exists
-        c.execute("SELECT id FROM users WHERE username='admin'")
-        if not c.fetchone():
-            pw_hash = bcrypt.hashpw(b'Admin@123', bcrypt.gensalt(12))
-            c.execute('''INSERT INTO users
-                (username, password_hash, full_name, age, gender, is_admin)
-                VALUES(?,?,?,?,?,?)''',
-                ('admin', pw_hash, 'System Administrator', 30, 'Male', 1))
-            st.toast("✅ Default admin account created (Admin@123)", icon="🔑")
-        
-        conn.commit()
-        conn.close()
-        return True
-        
-    except Exception as e:
-        st.error(f"❌ Database initialization failed: {e}")
-        st.info(f"Path attempted: {DB_PATH}")
-        return False
+    conn = sqlite3.connect('heart_monitor.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,full_name TEXT NOT NULL,
+        age INTEGER,gender TEXT,is_admin BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS test_results(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+        bpm INTEGER NOT NULL,quality REAL NOT NULL,
+        encrypted_hex TEXT NOT NULL,key_hex TEXT NOT NULL,
+        ecc_public_key TEXT,blockchain_hash TEXT,
+        test_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS audit_log(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,action TEXT NOT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,details TEXT,
+        previous_hash TEXT,current_hash TEXT)''')
+    c.execute("SELECT * FROM users WHERE username='admin'")
+    if not c.fetchone():
+        pw = bcrypt.hashpw(b'Admin@123', bcrypt.gensalt(12))
+        c.execute('INSERT INTO users(username,password_hash,full_name,age,gender,is_admin)VALUES(?,?,?,?,?,?)',
+                  ('admin', pw, 'System Administrator', 30, 'Male', 1))
+    conn.commit(); conn.close()
 
-# Call it early
-if not init_db():
-    st.stop()  # Prevent app from running with broken DB
-    
+
+init_db()
+
+
 def add_audit_log(user_id, action, details):
     conn = sqlite3.connect('heart_monitor.db')
     c = conn.cursor()
@@ -876,28 +842,6 @@ def show_dashboard():
                 <div style="font-size:.65rem;color:#94a3b8;font-family:monospace;margin-top:.25rem">
                 hash: {log[3][:40] if log[3] else 'N/A'}...</div>
             </div>""", unsafe_allow_html=True)
-            elif selected == "Health History":
-    st.markdown("""<div class="main-header">...""", unsafe_allow_html=True)
-    
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        c = conn.cursor()
-        c.execute('''SELECT bpm, quality, blockchain_hash, test_date 
-                     FROM test_results 
-                     WHERE user_id=? 
-                     ORDER BY test_date DESC''', (st.session_state.user_id,))
-        rows = c.fetchall()
-        conn.close()
-        
-        if rows:
-            # ... rest of your dataframe + chart code
-            pass
-        else:
-            st.info("No records yet. Take your first reading in **rPPG Monitor**.")
-            
-    except sqlite3.Error as e:
-        st.error(f"Database error: {e}")
-        st.info("Try refreshing the page. If the problem persists, check file permissions.")
 
 
 def main():
