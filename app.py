@@ -1,4 +1,4 @@
-# app.py - Main Streamlit Application
+# app.py - Main Streamlit Application (Updated with Balanced Theme)
 import streamlit as st
 import sqlite3
 import hashlib
@@ -29,307 +29,263 @@ st.set_page_config(
     page_title="MedChainSecure - IoMT Heart Rate Monitor",
     page_icon="❤️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# Custom CSS with theme support
-def inject_css(theme="dark"):
-    if theme == "dark":
-        css = """
-        <style>
-            /* Dark Theme Variables */
-            :root {
-                --bg-primary: #101415;
-                --bg-secondary: #1d2022;
-                --bg-card: rgba(29, 32, 34, 0.7);
-                --text-primary: #e0e3e5;
-                --text-secondary: #c5c6cd;
-                --accent-primary: #b9c7e4;
-                --accent-secondary: #4cd6fb;
-                --accent-tertiary: #4ae183;
-                --border-color: rgba(255, 255, 255, 0.1);
-                --error: #ffb4ab;
-                --error-container: #93000a;
-            }
-            
-            .stApp {
-                background: var(--bg-primary);
-            }
-            
-            /* Main container styling */
-            .main-header {
-                background: linear-gradient(135deg, #0a192f 0%, #1d2022 100%);
-                padding: 2rem;
-                border-radius: 15px;
-                margin-bottom: 2rem;
-                border: 1px solid var(--border-color);
-            }
-            
-            .glass-panel {
-                background: var(--bg-card);
-                backdrop-filter: blur(20px);
-                border: 1px solid var(--border-color);
-                border-radius: 0.75rem;
-            }
-            
-            .metric-card {
-                background: linear-gradient(180deg, rgba(76, 214, 251, 0.1) 0%, rgba(10, 25, 47, 0) 100%);
-                border-radius: 0.75rem;
-                padding: 1.5rem;
-                border: 1px solid var(--border-color);
-            }
-            
-            .stat-value {
-                font-size: 2.5rem;
-                font-weight: 700;
-                color: var(--text-primary);
-            }
-            
-            .stat-label {
-                font-size: 0.75rem;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                color: var(--text-secondary);
-            }
-            
-            /* Theme toggle button */
-            .theme-toggle {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                z-index: 1000;
-                background: var(--bg-card);
-                backdrop-filter: blur(10px);
-                border: 1px solid var(--border-color);
-                border-radius: 50%;
-                width: 48px;
-                height: 48px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .theme-toggle:hover {
-                transform: scale(1.05);
-            }
-            
-            /* Custom scrollbar */
-            ::-webkit-scrollbar {
-                width: 8px;
-                height: 8px;
-            }
-            
-            ::-webkit-scrollbar-track {
-                background: var(--bg-secondary);
-            }
-            
-            ::-webkit-scrollbar-thumb {
-                background: var(--accent-secondary);
-                border-radius: 4px;
-            }
-            
-            /* Status badges */
-            .status-badge {
-                display: inline-flex;
-                align-items: center;
-                gap: 0.5rem;
-                padding: 0.25rem 0.75rem;
-                border-radius: 9999px;
-                font-size: 0.75rem;
-                font-weight: 600;
-            }
-            
-            .status-active {
-                background: rgba(74, 225, 131, 0.1);
-                color: #4ae183;
-                border: 1px solid rgba(74, 225, 131, 0.2);
-            }
-            
-            .status-warning {
-                background: rgba(255, 180, 171, 0.1);
-                color: #ffb4ab;
-                border: 1px solid rgba(255, 180, 171, 0.2);
-            }
-            
-            /* Tables */
-            .data-table {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            
-            .data-table th {
-                text-align: left;
-                padding: 1rem;
-                background: rgba(50, 53, 55, 0.3);
-                font-size: 0.7rem;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                color: var(--text-secondary);
-            }
-            
-            .data-table td {
-                padding: 1rem;
-                border-bottom: 1px solid var(--border-color);
-            }
-            
-            /* Buttons */
-            .btn-primary {
-                background: linear-gradient(135deg, #4cd6fb 0%, #b9c7e4 100%);
-                color: #003642;
-                padding: 0.75rem 1.5rem;
-                border-radius: 0.5rem;
-                font-weight: 600;
-                border: none;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .btn-primary:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 20px rgba(76, 214, 251, 0.3);
-            }
-            
-            /* Code blocks */
-            code {
-                font-family: 'JetBrains Mono', monospace;
-                font-size: 0.75rem;
-                background: rgba(0, 0, 0, 0.3);
-                padding: 0.125rem 0.375rem;
-                border-radius: 0.25rem;
-            }
-            
-            /* Responsive */
-            @media (max-width: 768px) {
-                .main-header {
-                    padding: 1rem;
-                }
-                .stat-value {
-                    font-size: 1.5rem;
-                }
-            }
-        </style>
-        """
-    else:
-        css = """
-        <style>
-            /* Light Theme Variables */
-            :root {
-                --bg-primary: #f5f7fa;
-                --bg-secondary: #ffffff;
-                --bg-card: rgba(255, 255, 255, 0.9);
-                --text-primary: #1a1a2e;
-                --text-secondary: #4a5568;
-                --accent-primary: #4a90e2;
-                --accent-secondary: #00b2d6;
-                --accent-tertiary: #2ecc71;
-                --border-color: rgba(0, 0, 0, 0.1);
-                --error: #e74c3c;
-                --error-container: #fde0dd;
-            }
-            
-            .stApp {
-                background: var(--bg-primary);
-            }
-            
-            .main-header {
-                background: linear-gradient(135deg, #e8f4f8 0%, #ffffff 100%);
-                padding: 2rem;
-                border-radius: 15px;
-                margin-bottom: 2rem;
-                border: 1px solid var(--border-color);
-            }
-            
-            .glass-panel {
-                background: var(--bg-card);
-                backdrop-filter: blur(10px);
-                border: 1px solid var(--border-color);
-                border-radius: 0.75rem;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            }
-            
-            .metric-card {
-                background: linear-gradient(180deg, rgba(0, 178, 214, 0.05) 0%, rgba(255, 255, 255, 0) 100%);
-                border-radius: 0.75rem;
-                padding: 1.5rem;
-                border: 1px solid var(--border-color);
-            }
-            
-            .stat-value {
-                font-size: 2.5rem;
-                font-weight: 700;
-                color: var(--text-primary);
-            }
-            
-            .stat-label {
-                font-size: 0.75rem;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                color: var(--text-secondary);
-            }
-            
-            .theme-toggle {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                z-index: 1000;
-                background: var(--bg-card);
-                backdrop-filter: blur(10px);
-                border: 1px solid var(--border-color);
-                border-radius: 50%;
-                width: 48px;
-                height: 48px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .status-badge {
-                display: inline-flex;
-                align-items: center;
-                gap: 0.5rem;
-                padding: 0.25rem 0.75rem;
-                border-radius: 9999px;
-                font-size: 0.75rem;
-                font-weight: 600;
-            }
-            
-            .status-active {
-                background: rgba(46, 204, 113, 0.1);
-                color: #27ae60;
-                border: 1px solid rgba(46, 204, 113, 0.2);
-            }
-            
-            .btn-primary {
-                background: linear-gradient(135deg, #00b2d6 0%, #4a90e2 100%);
-                color: white;
-                padding: 0.75rem 1.5rem;
-                border-radius: 0.5rem;
-                font-weight: 600;
-                border: none;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            ::-webkit-scrollbar {
-                width: 8px;
-                height: 8px;
-            }
-            
-            ::-webkit-scrollbar-track {
-                background: var(--bg-secondary);
-            }
-            
-            ::-webkit-scrollbar-thumb {
-                background: var(--accent-secondary);
-                border-radius: 4px;
-            }
-        </style>
-        """
-    st.markdown(css, unsafe_allow_html=True)
+# Custom CSS with balanced professional theme
+st.markdown("""
+<style>
+    /* Professional Light Theme - Not too dark */
+    :root {
+        --bg-primary: #f8fafc;
+        --bg-secondary: #ffffff;
+        --bg-card: #ffffff;
+        --bg-card-alt: #f1f5f9;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --text-muted: #94a3b8;
+        --accent-primary: #3b82f6;
+        --accent-secondary: #06b6d4;
+        --accent-tertiary: #10b981;
+        --accent-warning: #f59e0b;
+        --accent-error: #ef4444;
+        --border-color: #e2e8f0;
+        --border-light: #f1f5f9;
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.05);
+    }
+    
+    .stApp {
+        background: var(--bg-primary);
+    }
+    
+    /* Main container styling */
+    .main-header {
+        background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+        padding: 2rem;
+        border-radius: 1rem;
+        margin-bottom: 2rem;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-md);
+    }
+    
+    .main-header h1, .main-header h2 {
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+    
+    .main-header p {
+        color: var(--text-secondary);
+    }
+    
+    .glass-panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 0.75rem;
+        box-shadow: var(--shadow-sm);
+        transition: all 0.3s ease;
+    }
+    
+    .glass-panel:hover {
+        box-shadow: var(--shadow-md);
+    }
+    
+    .metric-card {
+        background: var(--bg-card);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .stat-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+    
+    .stat-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    
+    /* Status badges */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    .status-active {
+        background: #dbeafe;
+        color: #1d4ed8;
+    }
+    
+    .status-good {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .status-warning {
+        background: #fed7aa;
+        color: #9a3412;
+    }
+    
+    .status-error {
+        background: #fee2e2;
+        color: #b91c1c;
+    }
+    
+    /* Tables */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .data-table th {
+        text-align: left;
+        padding: 0.75rem 1rem;
+        background: var(--bg-card-alt);
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+        font-weight: 600;
+    }
+    
+    .data-table td {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border-light);
+    }
+    
+    /* Buttons */
+    .btn-primary {
+        background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+        color: white;
+        padding: 0.625rem 1.25rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+    
+    .btn-secondary {
+        background: var(--bg-card-alt);
+        color: var(--text-primary);
+        padding: 0.625rem 1.25rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    /* Code blocks */
+    code {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.7rem;
+        background: var(--bg-card-alt);
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        color: var(--accent-primary);
+    }
+    
+    pre {
+        background: var(--bg-card-alt);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+        border: 1px solid var(--border-light);
+    }
+    
+    /* Cards */
+    .feature-card {
+        background: var(--bg-card);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        text-align: center;
+        border: 1px solid var(--border-color);
+        transition: all 0.3s ease;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-lg);
+        border-color: var(--accent-secondary);
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background: var(--bg-card);
+        border-right: 1px solid var(--border-color);
+    }
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: var(--bg-card-alt);
+        border-radius: 3px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: var(--accent-secondary);
+        border-radius: 3px;
+    }
+    
+    /* Streamlit overrides */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0.5rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: var(--bg-card-alt);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: var(--accent-primary);
+        color: white;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background: var(--bg-card-alt);
+        border-radius: 0.5rem;
+    }
+    
+    /* Metrics */
+    [data-testid="stMetricValue"] {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+    
+    /* Divider */
+    hr {
+        margin: 1rem 0;
+        border-color: var(--border-light);
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Initialize session state
 if 'authenticated' not in st.session_state:
@@ -340,8 +296,6 @@ if 'username' not in st.session_state:
     st.session_state.username = None
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
-if 'theme' not in st.session_state:
-    st.session_state.theme = 'dark'
 
 # Database setup
 def init_db():
@@ -433,7 +387,7 @@ def encrypt_aes_gcm(plaintext):
     nonce = secrets.token_bytes(12)
     cipher = AESGCM(key)
     ciphertext = cipher.encrypt(nonce, plaintext.encode(), None)
-    payload = nonce + ciphertext + ciphertext[-16:]
+    payload = nonce + ciphertext
     return key.hex(), payload.hex()
 
 def decrypt_aes_gcm(key_hex, payload_hex):
@@ -448,9 +402,9 @@ def get_bpm_category(bpm):
     if bpm < 60:
         return ("Bradycardia", "status-warning")
     elif 60 <= bpm <= 100:
-        return ("Normal", "status-active")
+        return ("Normal", "status-good")
     else:
-        return ("Tachycardia", "status-warning")
+        return ("Tachycardia", "status-error")
 
 def verify_blockchain_integrity():
     conn = sqlite3.connect('heart_monitor.db')
@@ -483,12 +437,13 @@ def show_login():
     with col2:
         st.markdown("""
         <div class="main-header" style="text-align: center;">
-            <h1 style="color: var(--accent-primary);">MedChainSecure</h1>
-            <p style="color: var(--text-secondary);">Secure IoMT Heart Rate Monitoring Platform</p>
-            <div style="display: flex; justify-content: center; gap: 1rem; margin-top: 1rem;">
+            <h1>❤️ MedChainSecure</h1>
+            <p style="font-size: 1rem;">Secure IoMT Heart Rate Monitoring Platform</p>
+            <div style="display: flex; justify-content: center; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;">
                 <span class="status-badge status-active">🔒 AES-256-GCM</span>
                 <span class="status-badge status-active">🔑 ECC SECP256R1</span>
                 <span class="status-badge status-active">📦 Blockchain Audit</span>
+                <span class="status-badge status-good">🏥 HIPAA Compliant</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -497,8 +452,8 @@ def show_login():
         
         with tab1:
             with st.form("login_form"):
-                username = st.text_input("Username")
-                password = st.text_input("Password", type="password")
+                username = st.text_input("Username", placeholder="Enter your username")
+                password = st.text_input("Password", type="password", placeholder="Enter your password")
                 submitted = st.form_submit_button("Login", use_container_width=True)
                 
                 if submitted:
@@ -516,21 +471,26 @@ def show_login():
                         add_audit_log(user[0], "LOGIN", f"User {username} logged in")
                         st.rerun()
                     else:
-                        st.error("Invalid username or password")
+                        st.error("❌ Invalid username or password")
         
         with tab2:
             with st.form("register_form"):
-                full_name = st.text_input("Full Name")
-                username = st.text_input("Username")
-                age = st.number_input("Age", min_value=1, max_value=120)
-                gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-                password = st.text_input("Password", type="password")
-                confirm = st.text_input("Confirm Password", type="password")
+                full_name = st.text_input("Full Name", placeholder="Enter your full name")
+                username = st.text_input("Username", placeholder="Choose a username")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    age = st.number_input("Age", min_value=1, max_value=120, value=30)
+                with col_b:
+                    gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+                password = st.text_input("Password", type="password", placeholder="Create a password")
+                confirm = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
                 submitted = st.form_submit_button("Register", use_container_width=True)
                 
                 if submitted:
                     if password != confirm:
-                        st.error("Passwords do not match")
+                        st.error("❌ Passwords do not match")
+                    elif len(password) < 6:
+                        st.error("❌ Password must be at least 6 characters")
                     else:
                         conn = sqlite3.connect('heart_monitor.db')
                         cursor = conn.cursor()
@@ -543,9 +503,9 @@ def show_login():
                             conn.commit()
                             user_id = cursor.lastrowid
                             add_audit_log(user_id, "REGISTER", f"New user {username} registered")
-                            st.success("Registration successful! Please login.")
+                            st.success("✅ Registration successful! Please login.")
                         except sqlite3.IntegrityError:
-                            st.error("Username already exists")
+                            st.error("❌ Username already exists")
                         finally:
                             conn.close()
 
@@ -554,9 +514,9 @@ def show_dashboard():
     # Sidebar Navigation
     with st.sidebar:
         st.markdown("""
-        <div style="text-align: center; margin-bottom: 2rem;">
-            <h3 style="color: var(--accent-primary);">MedChainSecure</h3>
-            <p style="font-size: 0.7rem; color: var(--text-secondary);">Verified Node v2.4</p>
+        <div style="text-align: center; margin-bottom: 2rem; padding: 1rem 0;">
+            <h2 style="color: var(--accent-primary); margin-bottom: 0;">❤️ MedChainSecure</h2>
+            <p style="font-size: 0.65rem; color: var(--text-muted); margin-top: 0.25rem;">Verified Node v2.4</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -565,18 +525,20 @@ def show_dashboard():
         if st.session_state.is_admin:
             pages.append("Admin Panel")
         
-        selected = st.radio("", pages, label_visibility="collapsed")
+        selected = st.radio("Navigation", pages, label_visibility="collapsed")
         
         st.markdown("---")
         
         # User info
         st.markdown(f"""
-        <div class="glass-panel" style="padding: 1rem;">
+        <div class="glass-panel" style="padding: 1rem; margin: 1rem 0;">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary)); border-radius: 50%;"></div>
+                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #3b82f6, #06b6d4); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                    <span style="color: white;">👤</span>
+                </div>
                 <div>
-                    <p style="font-weight: 600;">{st.session_state.username}</p>
-                    <p style="font-size: 0.7rem; color: var(--text-secondary);">{'Admin' if st.session_state.is_admin else 'User'}</p>
+                    <p style="font-weight: 600; margin: 0;">{st.session_state.username}</p>
+                    <p style="font-size: 0.65rem; color: var(--text-muted); margin: 0;">{'Administrator' if st.session_state.is_admin else 'Patient'}</p>
                 </div>
             </div>
         </div>
@@ -605,8 +567,8 @@ def show_dashboard():
 def show_dashboard_home():
     st.markdown("""
     <div class="main-header">
-        <h2 style="margin-bottom: 0.5rem;">System Overview</h2>
-        <p style="color: var(--text-secondary);">Real-time clinical integrity and user telemetry across 4-tier architecture.</p>
+        <h2>📊 System Overview</h2>
+        <p>Real-time clinical integrity and user telemetry across 4-tier architecture.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -633,7 +595,7 @@ def show_dashboard_home():
         <div class="metric-card">
             <div class="stat-label">TOTAL USERS</div>
             <div class="stat-value">{total_users:,}</div>
-            <div style="color: var(--accent-tertiary); font-size: 0.75rem;">+12% this month</div>
+            <div style="color: var(--accent-tertiary); font-size: 0.7rem; margin-top: 0.5rem;">↑ 12% this month</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -642,7 +604,7 @@ def show_dashboard_home():
         <div class="metric-card">
             <div class="stat-label">MONITORING SESSIONS</div>
             <div class="stat-value">{total_tests:,}</div>
-            <div style="color: var(--accent-tertiary); font-size: 0.75rem;">+5% this month</div>
+            <div style="color: var(--accent-tertiary); font-size: 0.7rem; margin-top: 0.5rem;">↑ 5% this month</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -651,48 +613,70 @@ def show_dashboard_home():
         <div class="metric-card">
             <div class="stat-label">AVERAGE BPM</div>
             <div class="stat-value">{avg_bpm:.0f}</div>
-            <div style="color: var(--accent-secondary); font-size: 0.75rem;">Normal range</div>
+            <div style="color: var(--accent-secondary); font-size: 0.7rem; margin-top: 0.5rem;">Normal range</div>
         </div>
         """, unsafe_allow_html=True)
     
     # Security badges
     st.markdown("""
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin: 2rem 0; justify-content: center;">
-        <div class="status-badge status-active">🔒 AES-256-GCM Encryption</div>
-        <div class="status-badge status-active">🔑 ECC SECP256R1 Key Exchange</div>
-        <div class="status-badge status-active">📦 Blockchain Audit Log</div>
-        <div class="status-badge status-active">🏥 HIPAA Compliant</div>
-        <div class="status-badge status-active">🌍 GDPR Verified</div>
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 2rem 0; justify-content: center;">
+        <span class="status-badge status-active">🔒 AES-256-GCM Encryption</span>
+        <span class="status-badge status-active">🔑 ECC SECP256R1 Key Exchange</span>
+        <span class="status-badge status-active">📦 Blockchain Audit Log</span>
+        <span class="status-badge status-good">🏥 HIPAA Compliant</span>
+        <span class="status-badge status-good">🌍 GDPR Verified</span>
     </div>
     """, unsafe_allow_html=True)
     
+    # Feature cards
+    st.markdown("<h3 style='margin-bottom: 1rem;'>Key Features</h3>", unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    features = [
+        ("📹", "rPPG Monitoring", "Non-invasive heart rate via webcam using CHROM algorithm"),
+        ("🔐", "Hybrid Encryption", "AES-256-GCM + ECC SECP256R1 for every record"),
+        ("🗄️", "Decentralised Storage", "3-layer: Local + Remote + Blockchain"),
+        ("📊", "Analytics Dashboard", "Trend charts, CSV export, and compliance reports")
+    ]
+    
+    for col, (icon, title, desc) in zip([col1, col2, col3, col4], features):
+        with col:
+            st.markdown(f"""
+            <div class="feature-card">
+                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{icon}</div>
+                <h4 style="margin: 0.5rem 0;">{title}</h4>
+                <p style="font-size: 0.7rem; color: var(--text-muted);">{desc}</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
     # Architecture grid
-    st.markdown("<h3 style='margin-bottom: 1rem;'>4-Tier System Architecture</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='margin: 2rem 0 1rem;'>4-Tier System Architecture</h3>", unsafe_allow_html=True)
     
     col1, col2, col3, col4 = st.columns(4)
     
     tiers = [
-        ("💻 Browser Client", "rPPG video capture, ROI extraction, CHROM algorithm", "#4cd6fb"),
-        ("🐍 Python Backend", "Authentication, hybrid encryption, stress analysis", "#b9c7e4"),
-        ("🗄️ 3-Layer Storage", "Local SQLite + Remote PHP + Blockchain ledger", "#4ae183"),
-        ("✅ Verification", "AES-GCM tag verification + Hash chain audit", "#ffb4ab")
+        ("💻", "Browser Client", "rPPG capture, ROI extraction, CHROM algorithm", "#3b82f6"),
+        ("🐍", "Python Backend", "Authentication, hybrid encryption, analysis", "#06b6d4"),
+        ("🗄️", "3-Layer Storage", "SQLite + PHP backup + Blockchain ledger", "#10b981"),
+        ("✅", "Verification", "AES-GCM tag verification + Hash chain", "#8b5cf6")
     ]
     
-    for col, (title, desc, color) in zip([col1, col2, col3, col4], tiers):
+    for col, (icon, title, desc, color) in zip([col1, col2, col3, col4], tiers):
         with col:
             st.markdown(f"""
-            <div class="glass-panel" style="padding: 1.5rem; height: 100%;">
-                <div style="font-size: 2rem; margin-bottom: 0.5rem;">{title.split()[0]}</div>
+            <div class="glass-panel" style="padding: 1.25rem; height: 100%; border-top: 3px solid {color};">
+                <div style="font-size: 1.75rem; margin-bottom: 0.5rem;">{icon}</div>
                 <h4 style="margin: 0.5rem 0;">{title}</h4>
-                <p style="font-size: 0.75rem; color: var(--text-secondary);">{desc}</p>
+                <p style="font-size: 0.7rem; color: var(--text-muted);">{desc}</p>
             </div>
             """, unsafe_allow_html=True)
 
 def show_rppg_monitor():
     st.markdown("""
     <div class="main-header">
-        <h2>rPPG Real-time Monitoring</h2>
-        <p style="color: var(--text-secondary);">Live Secure Stream • AES-256-GCM Encrypted</p>
+        <h2>📹 rPPG Real-time Monitoring</h2>
+        <p>Live Secure Stream • AES-256-GCM Encrypted</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -701,22 +685,22 @@ def show_rppg_monitor():
     with col1:
         st.markdown("""
         <div class="glass-panel" style="padding: 1rem;">
-            <div style="aspect-ratio: 16/9; background: linear-gradient(135deg, #0a192f, #1d2022); border-radius: 0.5rem; display: flex; align-items: center; justify-content: center; position: relative;">
+            <div style="aspect-ratio: 16/9; background: linear-gradient(135deg, #e2e8f0, #f1f5f9); border-radius: 0.75rem; display: flex; align-items: center; justify-content: center; position: relative;">
                 <div style="text-align: center;">
                     <span style="font-size: 4rem;">📹</span>
-                    <p style="margin-top: 1rem;">Camera feed would appear here</p>
-                    <p style="font-size: 0.7rem; color: var(--text-secondary);">Face detection and ROI extraction active</p>
+                    <p style="margin-top: 1rem; color: var(--text-secondary);">Camera feed would appear here</p>
+                    <p style="font-size: 0.7rem; color: var(--text-muted);">Face detection and ROI extraction active</p>
                 </div>
                 <div style="position: absolute; top: 1rem; left: 1rem; display: flex; gap: 0.5rem;">
-                    <div class="status-badge status-active" style="background: rgba(0,0,0,0.5);">
+                    <span class="status-badge status-active" style="background: #1e293b; color: white;">
                         <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
                         LIVE STREAM
-                    </div>
+                    </span>
                 </div>
                 <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;">
                     <div style="border: 2px solid var(--accent-secondary); border-radius: 1rem; width: 200px; height: 250px; position: relative;">
                         <div style="position: absolute; top: 2rem; left: 50%; transform: translateX(-50%); width: 100px; height: 50px; border: 2px solid var(--accent-secondary); border-radius: 0.5rem;">
-                            <div style="position: absolute; top: -1.5rem; left: 0; font-size: 0.6rem;">ROI: Forehead</div>
+                            <div style="position: absolute; top: -1.5rem; left: 0; font-size: 0.6rem; font-weight: 600;">ROI: Forehead</div>
                         </div>
                     </div>
                 </div>
@@ -729,15 +713,21 @@ def show_rppg_monitor():
         bpm = st.slider("Simulated BPM", 40, 150, 72)
         category, badge_class = get_bpm_category(bpm)
         
+        badge_color = {
+            "status-good": "#10b981",
+            "status-warning": "#f59e0b",
+            "status-error": "#ef4444"
+        }.get(badge_class, "#64748b")
+        
         st.markdown(f"""
         <div class="glass-panel" style="padding: 1.5rem; text-align: center;">
-            <div style="font-size: 3rem; font-weight: 700;">{bpm}</div>
+            <div style="font-size: 3rem; font-weight: 700; color: var(--text-primary);">{bpm}</div>
             <div style="font-size: 0.875rem; color: var(--text-secondary);">BPM</div>
-            <div class="status-badge {badge_class}" style="margin-top: 0.5rem; justify-content: center;">{category}</div>
+            <div class="{badge_class}" style="margin-top: 0.5rem; justify-content: center;">{category}</div>
             <div style="margin-top: 1rem;">
                 <div class="stat-label">Signal Quality</div>
                 <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-tertiary);">94%</div>
-                <div style="background: var(--bg-secondary); border-radius: 0.5rem; height: 4px; margin-top: 0.5rem;">
+                <div style="background: var(--bg-card-alt); border-radius: 0.5rem; height: 6px; margin-top: 0.5rem;">
                     <div style="width: 94%; background: var(--accent-tertiary); height: 100%; border-radius: 0.5rem;"></div>
                 </div>
             </div>
@@ -750,13 +740,13 @@ def show_rppg_monitor():
         <div class="glass-panel" style="padding: 1.5rem; margin-top: 1rem;">
             <div class="stat-label">Stress Analysis</div>
             <div style="display: flex; align-items: center; gap: 1rem; margin: 1rem 0;">
-                <div style="width: 50px; height: 50px; border-radius: 50%; border: 2px solid var(--accent-primary); display: flex; align-items: center; justify-content: center;">{stress_score}</div>
+                <div style="width: 50px; height: 50px; border-radius: 50%; border: 2px solid var(--accent-primary); display: flex; align-items: center; justify-content: center; font-weight: 700;">{stress_score}</div>
                 <div>
                     <div style="font-weight: 600;">Category: Minimal</div>
-                    <div style="font-size: 0.7rem; color: var(--text-secondary);">HRV Balance: Normal</div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">HRV Balance: Normal</div>
                 </div>
             </div>
-            <button class="btn-primary" style="width: 100%;">Save Result</button>
+            <button class="btn-primary" style="width: 100%;">💾 Save Result</button>
         </div>
         """, unsafe_allow_html=True)
     
@@ -764,12 +754,12 @@ def show_rppg_monitor():
     st.markdown("""
     <div class="glass-panel" style="padding: 1rem; margin-top: 1rem;">
         <div class="stat-label" style="margin-bottom: 1rem;">Real-time Waveform Decomposition</div>
-        <div style="height: 150px; background: var(--bg-secondary); border-radius: 0.5rem; position: relative; overflow: hidden;">
-            <svg width="100%" height="100%" viewBox="0 0 800 100" preserveAspectRatio="none">
-                <path d="M0,50 Q20,20 40,50 T80,50 T120,50 T160,50 T200,50 T240,50 T280,50 T320,50 T360,50 T400,50 T440,50 T480,50 T520,50 T560,50 T600,50 T640,50 T680,50 T720,50 T760,50 T800,50" fill="none" stroke="var(--accent-secondary)" stroke-width="2"/>
+        <div style="height: 120px; background: var(--bg-card-alt); border-radius: 0.5rem; position: relative; overflow: hidden;">
+            <svg width="100%" height="100%" viewBox="0 0 800 80" preserveAspectRatio="none">
+                <path d="M0,40 Q20,15 40,40 T80,40 T120,40 T160,40 T200,40 T240,40 T280,40 T320,40 T360,40 T400,40 T440,40 T480,40 T520,40 T560,40 T600,40 T640,40 T680,40 T720,40 T760,40 T800,40" fill="none" stroke="var(--accent-secondary)" stroke-width="2"/>
             </svg>
         </div>
-        <div style="display: flex; gap: 2rem; margin-top: 1rem; justify-content: space-around;">
+        <div style="display: flex; gap: 2rem; margin-top: 1rem; justify-content: space-around; flex-wrap: wrap;">
             <div><span class="stat-label">SpO₂ (EST)</span><br><strong>98%</strong></div>
             <div><span class="stat-label">RMSSD</span><br><strong>42.1 ms</strong></div>
             <div><span class="stat-label">Resp Rate</span><br><strong>14 BrPM</strong></div>
@@ -781,8 +771,8 @@ def show_rppg_monitor():
 def show_health_history():
     st.markdown("""
     <div class="main-header">
-        <h2>Health History</h2>
-        <p style="color: var(--text-secondary);">Your complete medical timeline with cryptographic verification</p>
+        <h2>📋 Health History</h2>
+        <p>Your complete medical timeline with cryptographic verification</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -815,53 +805,65 @@ def show_health_history():
             x=df['Date'], y=df['BPM'],
             mode='lines+markers',
             name='Heart Rate',
-            line=dict(color='#4cd6fb', width=2),
+            line=dict(color='#3b82f6', width=2),
             marker=dict(size=8, color=df['BPM'], colorscale='RdYlGn_r', showscale=True)
         ))
-        fig.add_hrect(y0=60, y1=100, line_width=0, fillcolor="green", opacity=0.1, annotation_text="Normal Range")
+        fig.add_hrect(y0=60, y1=100, line_width=0, fillcolor="#10b981", opacity=0.1, annotation_text="Normal Range")
         fig.update_layout(
             title="Heart Rate Trend",
             xaxis_title="Date",
             yaxis_title="BPM",
-            template="plotly_dark",
+            template="plotly_white",
             height=400,
-            hovermode='x unified'
+            hovermode='x unified',
+            plot_bgcolor='white',
+            paper_bgcolor='white'
         )
         st.plotly_chart(fig, use_container_width=True)
         
         # Records table
-        st.markdown("### Verified Clinical Log")
+        st.markdown("### 📊 Verified Clinical Log")
         
         for _, row in df.head(10).iterrows():
             category, _ = get_bpm_category(row['BPM'])
-            status_color = "#4ae183" if category == "Normal" else "#ffb4ab" if category == "Tachycardia" else "#4cd6fb"
+            status_color = "#10b981" if category == "Normal" else "#ef4444" if category == "Tachycardia" else "#f59e0b"
             
             st.markdown(f"""
-            <div class="glass-panel" style="padding: 0.75rem; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+            <div class="glass-panel" style="padding: 0.75rem; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                 <div>
                     <strong>{row['Date']}</strong><br>
-                    <span style="font-size: 0.7rem; color: var(--text-secondary);">Quality: {row['Quality']:.1f}%</span>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">Quality: {row['Quality']:.1f}%</span>
                 </div>
                 <div style="text-align: center;">
                     <span style="font-size: 1.25rem; font-weight: 700;">{row['BPM']}</span>
                     <span style="font-size: 0.7rem;"> BPM</span>
                 </div>
                 <div>
-                    <span class="status-badge" style="background: {status_color}20; color: {status_color};">{category}</span>
+                    <span class="status-badge" style="background: {status_color}15; color: {status_color};">{category}</span>
                 </div>
                 <div>
-                    <span class="material-symbols-outlined" style="font-size: 1rem;">verified</span>
+                    <span style="color: var(--accent-tertiary);">✓ Verified</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
+        
+        # Export button
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="📥 Export to CSV",
+            data=csv,
+            file_name=f"health_history_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
     else:
-        st.info("No health records found. Start monitoring to see your history here.")
+        st.info("ℹ️ No health records found. Start monitoring to see your history here.")
 
 def show_encryption_lab():
     st.markdown("""
     <div class="main-header">
-        <h2>Encryption Laboratory</h2>
-        <p style="color: var(--text-secondary);">7-step cryptographic walkthrough for IoMT data protection</p>
+        <h2>🔬 Encryption Laboratory</h2>
+        <p>7-step cryptographic walkthrough for IoMT data protection</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -879,7 +881,7 @@ def show_encryption_lab():
         st.markdown("""
         <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
             <div class="stat-label">Step 1: Original Plaintext</div>
-            <pre style="background: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 0.25rem; overflow-x: auto;"><code>""" + json.dumps(sample_data, indent=2) + """</code></pre>
+            <pre><code>""" + json.dumps(sample_data, indent=2) + """</code></pre>
         </div>
         """, unsafe_allow_html=True)
         
@@ -889,9 +891,9 @@ def show_encryption_lab():
         st.markdown(f"""
         <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
             <div class="stat-label">Step 2-3: AES-256-GCM Encryption</div>
-            <div><strong>AES Key:</strong> <code>{key_hex[:32]}...</code></div>
+            <div style="margin: 0.5rem 0;"><strong>AES Key:</strong> <code>{key_hex[:32]}...</code></div>
             <div><strong>Encrypted Payload:</strong> <code>{encrypted[:64]}...</code></div>
-            <div class="status-badge status-active" style="margin-top: 0.5rem;">✓ Encryption Complete</div>
+            <div class="status-badge status-good" style="margin-top: 0.75rem;">✓ Encryption Complete</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -906,9 +908,9 @@ def show_encryption_lab():
         st.markdown(f"""
         <div class="glass-panel" style="padding: 1rem;">
             <div class="stat-label">Step 4: ECC SECP256R1 Key Pair</div>
-            <div><strong>Public Key:</strong> <code>{public_pem[:40].decode()}...</code></div>
-            <div><strong>Private Key:</strong> <code style="color: var(--error);">[REDACTED]</code></div>
-            <div class="status-badge status-active" style="margin-top: 0.5rem;">✓ Key Exchange Ready</div>
+            <div style="margin: 0.5rem 0;"><strong>Public Key:</strong> <code>{public_pem[:40].decode()}...</code></div>
+            <div><strong>Private Key:</strong> <code style="color: var(--accent-error);">[REDACTED - Secure Enclave]</code></div>
+            <div class="status-badge status-good" style="margin-top: 0.75rem;">✓ Key Exchange Ready</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -921,9 +923,9 @@ def show_encryption_lab():
             st.markdown(f"""
             <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
                 <div class="stat-label">Step 5-7: Decryption & Verification</div>
-                <pre style="background: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 0.25rem; overflow-x: auto;"><code>""" + json.dumps(decrypted_data, indent=2) + """</code></pre>
-                <div class="status-badge status-active" style="margin-top: 0.5rem;">✓ Tag Verification Passed</div>
-                <div class="status-badge status-active" style="margin-top: 0.5rem;">✓ Integrity Check Passed</div>
+                <pre><code>""" + json.dumps(decrypted_data, indent=2) + """</code></pre>
+                <div class="status-badge status-good" style="margin-top: 0.5rem;">✓ Tag Verification Passed</div>
+                <div class="status-badge status-good" style="margin-top: 0.5rem;">✓ Integrity Check Passed</div>
             </div>
             """, unsafe_allow_html=True)
         except Exception as e:
@@ -933,11 +935,11 @@ def show_encryption_lab():
         st.markdown("""
         <div class="glass-panel" style="padding: 1rem;">
             <div class="stat-label">Compliance Report</div>
-            <div style="margin-top: 0.5rem;">
-                <div>✓ HIPAA Security Rule §164.312(e)(2)(ii)</div>
-                <div>✓ GDPR Article 32 Security of Processing</div>
-                <div>✓ NIST SP 800-38D (AES-GCM)</div>
-                <div>✓ FIPS 186-4 (ECC)</div>
+            <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                <div class="status-badge status-good">✓ HIPAA Security Rule §164.312(e)(2)(ii)</div>
+                <div class="status-badge status-good">✓ GDPR Article 32 Security of Processing</div>
+                <div class="status-badge status-good">✓ NIST SP 800-38D (AES-GCM)</div>
+                <div class="status-badge status-good">✓ FIPS 186-4 (ECC)</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -945,8 +947,8 @@ def show_encryption_lab():
 def show_network_storage():
     st.markdown("""
     <div class="main-header">
-        <h2>Decentralisation & Storage</h2>
-        <p style="color: var(--text-secondary);">3-Layer distributed architecture with blockchain audit</p>
+        <h2>🌐 Decentralisation & Storage</h2>
+        <p>3-Layer distributed architecture with blockchain audit</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -954,26 +956,26 @@ def show_network_storage():
     col1, col2, col3 = st.columns(3)
     
     layers = [
-        ("Layer 1: Local Vault", "SQLite Database", "0.4ms Latency", "45% Used", "#4cd6fb"),
-        ("Layer 2: Remote Relay", "PHP Backup Server", "2.1s Latency", "Synced", "#b9c7e4"),
-        ("Layer 3: Blockchain", "Immutable Ledger", "Verified", "Block Height: 48,291", "#4ae183")
+        ("Layer 1: Local Vault", "SQLite Database", "0.4ms Latency", "45% Used", "#3b82f6"),
+        ("Layer 2: Remote Relay", "PHP Backup Server", "2.1s Latency", "Active", "#06b6d4"),
+        ("Layer 3: Blockchain", "Immutable Ledger", "Verified", "Block #48,291", "#10b981")
     ]
     
     for col, (title, subtitle, metric, status, color) in zip([col1, col2, col3], layers):
         with col:
             st.markdown(f"""
             <div class="glass-panel" style="padding: 1.5rem; text-align: center; border-top: 3px solid {color};">
-                <h4>{title}</h4>
-                <p style="font-size: 0.7rem; color: var(--text-secondary);">{subtitle}</p>
+                <h4 style="margin-bottom: 0.5rem;">{title}</h4>
+                <p style="font-size: 0.7rem; color: var(--text-muted);">{subtitle}</p>
                 <div style="margin: 1rem 0;">
                     <div style="font-size: 1.5rem; font-weight: 700;">{metric}</div>
                 </div>
-                <div class="status-badge status-active" style="justify-content: center;">{status}</div>
+                <div class="status-badge status-good" style="justify-content: center;">{status}</div>
             </div>
             """, unsafe_allow_html=True)
     
     # Blockchain integrity check
-    st.markdown("### Blockchain Ledger Audit")
+    st.markdown("### 🔗 Blockchain Ledger Audit")
     
     is_valid, broken_at = verify_blockchain_integrity()
     
@@ -992,25 +994,25 @@ def show_network_storage():
     logs = cursor.fetchall()
     conn.close()
     
-    st.markdown("### Recent Audit Entries")
+    st.markdown("### 📜 Recent Audit Entries")
     
     for log in logs:
         st.markdown(f"""
         <div class="glass-panel" style="padding: 0.75rem; margin-bottom: 0.5rem;">
-            <div style="display: flex; justify-content: space-between;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                 <span><strong>{log[0]}</strong></span>
                 <span class="status-badge status-active">{log[1]}</span>
             </div>
             <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">{log[2]}</div>
-            <div style="font-size: 0.6rem; font-family: monospace; margin-top: 0.25rem;">Hash: {log[3][:32]}...</div>
+            <div style="font-size: 0.6rem; font-family: monospace; margin-top: 0.25rem; color: var(--text-muted);">Hash: {log[3][:32]}...</div>
         </div>
         """, unsafe_allow_html=True)
 
 def show_admin_panel():
     st.markdown("""
     <div class="main-header">
-        <h2>Admin Panel</h2>
-        <p style="color: var(--text-secondary);">System administration and user management</p>
+        <h2>⚙️ Admin Panel</h2>
+        <p>System administration and user management</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1023,34 +1025,38 @@ def show_admin_panel():
                COUNT(t.id) as record_count
         FROM users u
         LEFT JOIN test_results t ON u.id = t.user_id
+        WHERE u.username != 'admin'
         GROUP BY u.id
         ORDER BY u.id
     ''')
     users = cursor.fetchall()
     conn.close()
     
-    st.markdown("### User Management")
+    st.markdown("### 👥 User Management")
     
-    for user in users:
-        with st.expander(f"{user[1]} - {user[2]}"):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write(f"**Age:** {user[3]}")
-                st.write(f"**Gender:** {user[4]}")
-            with col2:
-                st.write(f"**Admin:** {'Yes' if user[5] else 'No'}")
-                st.write(f"**Records:** {user[6]}")
-            with col3:
-                if not user[5] and st.button(f"Make Admin", key=f"admin_{user[0]}"):
-                    conn2 = sqlite3.connect('heart_monitor.db')
-                    cursor2 = conn2.cursor()
-                    cursor2.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user[0],))
-                    conn2.commit()
-                    conn2.close()
-                    st.rerun()
+    if users:
+        for user in users:
+            with st.expander(f"{user[1]} - {user[2]}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"**Age:** {user[3]}")
+                    st.write(f"**Gender:** {user[4]}")
+                with col2:
+                    st.write(f"**Admin:** {'Yes' if user[5] else 'No'}")
+                    st.write(f"**Records:** {user[6]}")
+                with col3:
+                    if not user[5] and st.button(f"Make Admin", key=f"admin_{user[0]}"):
+                        conn2 = sqlite3.connect('heart_monitor.db')
+                        cursor2 = conn2.cursor()
+                        cursor2.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user[0],))
+                        conn2.commit()
+                        conn2.close()
+                        st.rerun()
+    else:
+        st.info("No regular users found.")
     
     # System stats
-    st.markdown("### System Statistics")
+    st.markdown("### 📊 System Statistics")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1076,25 +1082,14 @@ def show_admin_panel():
         st.metric("Audit Logs", total_audits)
     with col4:
         integrity, _ = verify_blockchain_integrity()
-        st.metric("Blockchain Status", "Valid" if integrity else "Tampered")
-
-# Theme toggle component
-def theme_toggle():
-    icon = "🌙" if st.session_state.theme == "light" else "☀️"
-    if st.button(icon, key="theme_toggle", help="Toggle theme"):
-        st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
-        inject_css(st.session_state.theme)
-        st.rerun()
+        st.metric("Blockchain Status", "✅ Valid" if integrity else "❌ Tampered")
 
 # Main app
 def main():
-    inject_css(st.session_state.theme)
-    
     if not st.session_state.authenticated:
         show_login()
     else:
         show_dashboard()
-        theme_toggle()
 
 if __name__ == "__main__":
     main()
