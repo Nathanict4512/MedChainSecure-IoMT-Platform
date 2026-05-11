@@ -876,6 +876,28 @@ def show_dashboard():
                 <div style="font-size:.65rem;color:#94a3b8;font-family:monospace;margin-top:.25rem">
                 hash: {log[3][:40] if log[3] else 'N/A'}...</div>
             </div>""", unsafe_allow_html=True)
+            elif selected == "Health History":
+    st.markdown("""<div class="main-header">...""", unsafe_allow_html=True)
+    
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        c = conn.cursor()
+        c.execute('''SELECT bpm, quality, blockchain_hash, test_date 
+                     FROM test_results 
+                     WHERE user_id=? 
+                     ORDER BY test_date DESC''', (st.session_state.user_id,))
+        rows = c.fetchall()
+        conn.close()
+        
+        if rows:
+            # ... rest of your dataframe + chart code
+            pass
+        else:
+            st.info("No records yet. Take your first reading in **rPPG Monitor**.")
+            
+    except sqlite3.Error as e:
+        st.error(f"Database error: {e}")
+        st.info("Try refreshing the page. If the problem persists, check file permissions.")
 
 
 def main():
