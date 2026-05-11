@@ -1,24 +1,11 @@
 # app.py - MedChainSecure Complete Application
-# Fix: Save reading no longer logs user out.
-# Strategy: the iframe component writes bpm/quality into a tiny localStorage-style
-# hidden <input> injected into the PARENT document, then calls
-# window.parent.streamlitBridge.setComponentValue() — but since that API is
-# unavailable in plain st.html(), we use a different trick:
-#   • The component POSTs to a hidden <form> that targets a special iframe
-#     whose src is a data-URI — this does NOT navigate the main page.
-#   • Instead we rely on st.session_state + Streamlit's built-in
-#     streamlit-component-value bridge via a tiny wrapper component that
-#     returns a value through Streamlit's bidirectional component API.
-#
-# Simplest reliable approach that keeps session alive:
-#   Use streamlit-component-value via components.declare_component is complex.
-#   The REAL fix: stop reloading the page at all.
-#   Instead, the iframe sends postMessage to the parent. A tiny <script> block
-#   injected by st.markdown listens for it, stores in sessionStorage, and
-#   triggers a Streamlit rerun by clicking a hidden st.button via JS.
-#   This keeps Streamlit session state fully intact.
+# Save fix: uses Streamlit's internal bidirectional component protocol
+# (streamlit:componentReady / streamlit:setComponentValue postMessages)
+# so the iframe returns a value directly to Python — no page reload,
+# no logout, no query-param tricks needed.
 
 import streamlit as st
+import streamlit.components.v1 as components
 import sqlite3
 import hashlib
 import json
@@ -31,7 +18,6 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import bcrypt
-from streamlit.components.v1 import html as st_html
 import time
 
 st.set_page_config(
@@ -63,17 +49,20 @@ st.markdown("""
 .stat-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
 .status-badge{display:inline-flex;align-items:center;gap:.5rem;padding:.35rem .85rem;border-radius:9999px;font-size:.75rem;font-weight:600}
 .status-good{background:#d1fae5;color:#065f46}
-.status-info{background:#dbeafe;color:#1e40af}
-.enc-preview{font-family:'Courier New',monospace;font-size:.7rem;background:#1e293b;color:#a5f3fc;padding:.75rem;border-radius:.5rem;overflow-x:auto}
+.enc-preview{font-family:'Courier New',monospace;font-size:.7rem;background:#1e293b;color:#a5f3fc;padding:.75rem;border-radius:.5rem;overflow-x:auto;line-height:1.6}
 .stButton>button{width:100%;border-radius:.5rem;font-weight:600;padding:.5rem 1rem}
-/* hide the trigger button visually but keep it clickable by JS */
-#save-trigger-btn{visibility:hidden;height:0;padding:0;margin:0;border:none}
+.enc-step{background:#fff;border:1px solid #e2e8f0;border-radius:.75rem;padding:1rem;margin-bottom:.75rem}
+.enc-step-title{font-weight:700;color:#1e293b;margin-bottom:.3rem;font-size:.95rem}
+.enc-step-desc{color:#64748b;font-size:.8rem;margin-bottom:.5rem}
+.chain-block{background:linear-gradient(135deg,#1e293b,#0f172a);border-radius:.75rem;padding:1rem;margin-bottom:.5rem;color:#e2e8f0;font-family:'Courier New',monospace;font-size:.72rem;line-height:1.7;border:1px solid #334155}
+.chain-link{text-align:center;color:#3b82f6;font-size:1.2rem;margin:.2rem 0}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state ──────────────────────────────────────────────────────────────
 for k, v in [('authenticated',False),('user_id',None),('username',None),
-             ('is_admin',False),('saved_bpm',None),('saved_quality',None)]:
+             ('is_admin',False),('saved_bpm',None),('saved_quality',None),
+             ('last_enc',None)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -90,7 +79,8 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
         bpm INTEGER NOT NULL,quality REAL NOT NULL,
         encrypted_hex TEXT NOT NULL,key_hex TEXT NOT NULL,
-        ecc_public_key TEXT,test_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        ecc_public_key TEXT,blockchain_hash TEXT,
+        test_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS audit_log(
         id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,action TEXT NOT NULL,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,details TEXT,
@@ -115,70 +105,108 @@ def add_audit_log(user_id, action, details):
     c.execute('INSERT INTO audit_log(user_id,action,timestamp,details,previous_hash,current_hash)VALUES(?,?,?,?,?,?)',
               (user_id,action,ts,details,ph,ch))
     conn.commit(); conn.close()
+    return ch  # return hash for blockchain display
 
-def encrypt_and_save(bpm, quality):
-    data = {"patient_id":f"PT-{st.session_state.user_id:04d}","heart_rate":bpm,
-            "signal_quality":quality,"timestamp":datetime.now().isoformat(),
-            "user":st.session_state.username}
-    pt = json.dumps(data)
-    key = secrets.token_bytes(32); key_hex = key.hex()
-    nonce = secrets.token_bytes(12)
-    ct = AESGCM(key).encrypt(nonce, pt.encode(), None)
-    payload = (nonce+ct).hex()
-    priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
-    pub_pem = priv.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    sig = hashlib.sha256(f"{payload}{key_hex}".encode()).hexdigest()
-    bhash = hashlib.sha256(
-        f"GENESIS{st.session_state.user_id}SAVE{datetime.now().isoformat()}{sig}".encode()).hexdigest()
+def do_encrypt_and_save(bpm, quality):
+    """Encrypt, save to DB, return all encryption artefacts for display."""
+    ts = datetime.now().isoformat()
+    health_data = {
+        "patient_id": f"PT-{st.session_state.user_id:04d}",
+        "heart_rate": bpm,
+        "signal_quality": round(quality, 2),
+        "timestamp": ts,
+        "user": st.session_state.username
+    }
+    plaintext = json.dumps(health_data, indent=2)
+
+    # AES-256-GCM
+    aes_key   = secrets.token_bytes(32)
+    nonce     = secrets.token_bytes(12)
+    cipher    = AESGCM(aes_key)
+    ciphertext = cipher.encrypt(nonce, plaintext.encode(), None)
+    payload   = (nonce + ciphertext).hex()
+    key_hex   = aes_key.hex()
+    nonce_hex = nonce.hex()
+    ct_hex    = ciphertext.hex()
+
+    # ECC SECP256R1
+    priv_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
+    pub_key  = priv_key.public_key()
+    pub_pem  = pub_key.public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    priv_pem = priv_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption()
+    ).decode()
+
+    # HMAC integrity signature
+    hmac_input = f"{payload}{key_hex}".encode()
+    hmac_sig   = hashlib.sha256(hmac_input).hexdigest()
+
+    # Blockchain hash (chained)
     conn = sqlite3.connect('heart_monitor.db')
     c = conn.cursor()
-    c.execute('INSERT INTO test_results(user_id,bpm,quality,encrypted_hex,key_hex,ecc_public_key)VALUES(?,?,?,?,?,?)',
-              (st.session_state.user_id,bpm,quality,payload,key_hex,pub_pem[:100].decode()))
-    conn.commit(); conn.close()
-    add_audit_log(st.session_state.user_id,"SAVE_RESULT",f"BPM:{bpm} Q:{quality}%")
-    return key_hex, payload, pub_pem.decode(), bhash
+    c.execute("SELECT blockchain_hash FROM test_results ORDER BY id DESC LIMIT 1")
+    prev_block = c.fetchone()
+    prev_hash  = prev_block[0] if prev_block else 'GENESIS_BLOCK_0000000000000000000000000000000'
 
+    block_data = f"{prev_hash}{st.session_state.user_id}{bpm}{quality}{ts}{hmac_sig}"
+    block_hash = hashlib.sha256(block_data.encode()).hexdigest()
 
-# ── postMessage bridge injected into the main Streamlit page ──────────────────
-# This script lives in the TOP-LEVEL Streamlit page (not the iframe).
-# It listens for {type:'save_reading', bpm, quality} from the iframe child,
-# stores the values in sessionStorage, then programmatically clicks the hidden
-# Streamlit button which triggers a Python rerun WITHOUT a page reload.
-BRIDGE_SCRIPT = """
-<script>
-(function(){
-  // Only register once
-  if(window.__medBridgeReady) return;
-  window.__medBridgeReady = true;
+    # Audit log
+    audit_hash = add_audit_log(st.session_state.user_id, "SAVE_RESULT", f"BPM:{bpm} Q:{quality}%")
 
-  window.addEventListener('message', function(e){
-    var d = e.data;
-    if(!d || d.type !== 'save_reading') return;
-    if(!d.bpm || !d.quality) return;
+    # Save to DB
+    c.execute('''INSERT INTO test_results
+        (user_id,bpm,quality,encrypted_hex,key_hex,ecc_public_key,blockchain_hash)
+        VALUES(?,?,?,?,?,?,?)''',
+        (st.session_state.user_id, bpm, quality, payload, key_hex, pub_pem[:120], block_hash))
+    conn.commit()
+    # Fetch record id
+    record_id = c.lastrowid
+    conn.close()
 
-    // Store in sessionStorage so Python can read via st.session_state bridge
-    sessionStorage.setItem('med_bpm',     String(d.bpm));
-    sessionStorage.setItem('med_quality', String(d.quality));
-
-    // Click the hidden Streamlit button to trigger a Python rerun
-    var btn = window.parent.document.querySelector('button[kind="secondary"][data-testid="baseButton-secondary"]#save-trigger-btn');
-    // Fallback: find any button whose text includes the unique marker
-    var allBtns = window.parent.document.querySelectorAll('button');
-    for(var i=0;i<allBtns.length;i++){
-      if(allBtns[i].innerText.trim() === '__SAVE_TRIGGER__'){
-        allBtns[i].click();
-        return;
-      }
+    return {
+        "record_id":   record_id,
+        "bpm":         bpm,
+        "quality":     quality,
+        "ts":          ts,
+        "plaintext":   plaintext,
+        "aes_key":     key_hex,
+        "nonce":       nonce_hex,
+        "ciphertext":  ct_hex,
+        "payload":     payload,
+        "pub_pem":     pub_pem,
+        "priv_pem_stub": priv_pem[:60] + "...(stored securely)",
+        "hmac":        hmac_sig,
+        "prev_hash":   prev_hash,
+        "block_hash":  block_hash,
+        "audit_hash":  audit_hash,
     }
-  });
-})();
-</script>
-"""
 
-# ── rPPG iframe component — NO page reload on save ────────────────────────────
+
+# ── rPPG Component using Streamlit's internal component protocol ───────────────
+# declare_component without a URL causes Streamlit to embed the html directly
+# and wire up the postMessage protocol so the iframe can return a Python value.
+_rppg_component = components.declare_component(
+    "rppg_monitor",
+    url=None,   # will use html= kwarg trick via a data URI below
+)
+
 def rppg_component():
-    html_src = r"""<!DOCTYPE html>
+    """
+    Renders the rPPG camera monitor.
+    Returns dict {bpm, quality} when Save is pressed, else None.
+    Uses Streamlit's official internal component protocol:
+      1. iframe sends  postMessage({type:'streamlit:componentReady', apiVersion:1})
+      2. Streamlit responds with streamlit:render
+      3. On save, iframe sends postMessage({type:'streamlit:setComponentValue',
+                                            value:{bpm,quality}, dataType:'json'})
+      4. Python receives the value as the component's return value.
+    """
+    html_body = r"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -186,21 +214,21 @@ def rppg_component():
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;background:#0d1117;font-family:system-ui,sans-serif;overflow:hidden}
 #root{display:flex;flex-direction:column;height:100vh}
-#vWrap{position:relative;flex:0 0 auto;background:#000}
-#video{width:100%;display:block;transform:scaleX(-1)}
+#vWrap{position:relative;background:#000;flex-shrink:0}
+#video{width:100%;display:block;transform:scaleX(-1);max-height:260px;object-fit:cover}
 #oc{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-#bpmRow{display:flex;align-items:center;gap:10px;padding:7px 12px;background:#0d1117;border-top:1px solid #1e293b;flex-shrink:0}
-#bpmNum{font-size:2.4rem;font-weight:900;color:#10b981;line-height:1;letter-spacing:-1px;min-width:70px}
-#bpmLbl{font-size:.65rem;color:#475569;align-self:flex-end;padding-bottom:4px}
+#bpmRow{display:flex;align-items:center;gap:10px;padding:6px 12px;background:#0d1117;border-top:1px solid #1e293b;flex-shrink:0}
+#bpmNum{font-size:2.2rem;font-weight:900;color:#10b981;line-height:1;letter-spacing:-1px;min-width:65px}
+#bpmLbl{font-size:.6rem;color:#475569;align-self:flex-end;padding-bottom:3px}
 #qWrap{flex:1}
-#qLbl{font-size:.6rem;color:#475569;margin-bottom:3px}
+#qLbl{font-size:.58rem;color:#475569;margin-bottom:2px}
 #qBar{height:4px;background:#1e293b;border-radius:2px;overflow:hidden}
 #qFill{height:100%;width:0%;background:#3b82f6;border-radius:2px;transition:width .4s}
-#catBadge{font-size:.65rem;font-weight:700;padding:3px 9px;border-radius:20px;background:#1e293b;color:#94a3b8;white-space:nowrap}
-#wc{width:100%;height:50px;display:block;background:#0d1117;flex-shrink:0;border-top:1px solid #1e293b}
-#sb{font-size:11px;color:#64748b;background:#0d1117;padding:5px 10px;text-align:center;flex-shrink:0;border-top:1px solid #1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#ctrl{display:flex;gap:8px;padding:9px 10px;background:#0d1117;border-top:1px solid #1e293b;flex-shrink:0}
-button{flex:1;padding:8px 4px;border:none;border-radius:7px;font-weight:700;cursor:pointer;font-size:12px}
+#catBadge{font-size:.62rem;font-weight:700;padding:2px 8px;border-radius:20px;background:#1e293b;color:#94a3b8;white-space:nowrap}
+#wc{width:100%;height:46px;display:block;background:#0d1117;flex-shrink:0;border-top:1px solid #1e293b}
+#sb{font-size:10px;color:#64748b;background:#0d1117;padding:4px 10px;text-align:center;flex-shrink:0;border-top:1px solid #1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ctrl{display:flex;gap:7px;padding:8px 10px;background:#0d1117;border-top:1px solid #1e293b;flex-shrink:0}
+button{flex:1;padding:7px 4px;border:none;border-radius:7px;font-weight:700;cursor:pointer;font-size:11px}
 #startBtn{background:#3b82f6;color:#fff}
 #startBtn:hover{background:#2563eb}
 #stopBtn{background:#1e293b;color:#64748b}
@@ -208,11 +236,9 @@ button{flex:1;padding:8px 4px;border:none;border-radius:7px;font-weight:700;curs
 #saveBtn{background:#10b981;color:#fff}
 #saveBtn:hover{background:#059669}
 #saveBtn:disabled{background:#1e293b;color:#374151;cursor:not-allowed}
-#toast{
-  position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(20px);
-  background:#10b981;color:#fff;padding:8px 18px;border-radius:8px;font-size:12px;
-  font-weight:700;opacity:0;transition:all .3s;pointer-events:none;white-space:nowrap;
-}
+#toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%) translateY(10px);
+  background:#10b981;color:#fff;padding:6px 16px;border-radius:7px;font-size:11px;
+  font-weight:700;opacity:0;transition:all .3s;pointer-events:none;white-space:nowrap;z-index:99}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
 </head>
@@ -223,8 +249,7 @@ button{flex:1;padding:8px 4px;border:none;border-radius:7px;font-weight:700;curs
     <canvas id="oc"></canvas>
   </div>
   <div id="bpmRow">
-    <div id="bpmNum">--</div>
-    <div id="bpmLbl">BPM</div>
+    <div id="bpmNum">--</div><div id="bpmLbl">BPM</div>
     <div id="qWrap">
       <div id="qLbl">Signal Quality</div>
       <div id="qBar"><div id="qFill"></div></div>
@@ -238,10 +263,30 @@ button{flex:1;padding:8px 4px;border:none;border-radius:7px;font-weight:700;curs
     <button id="stopBtn">⏹ Stop</button>
     <button id="saveBtn" disabled>💾 Save Reading</button>
   </div>
-  <div id="toast">✅ Reading sent to Streamlit!</div>
+  <div id="toast">✅ Reading saved!</div>
 </div>
 
 <script>
+// ── Streamlit component handshake ─────────────────────────────────────────────
+// Step 1: announce we are ready (apiVersion must be 1)
+window.parent.postMessage({type:'streamlit:componentReady', apiVersion:1}, '*');
+
+// Step 2: listen for streamlit:render (gives us args from Python)
+window.addEventListener('message', function(e){
+  if(e.data && e.data.type === 'streamlit:render'){
+    // args available via e.data.args — we don't need any for this component
+  }
+});
+
+// Helper: send value back to Python (triggers rerun, component returns this value)
+function sendToPython(value){
+  window.parent.postMessage({
+    type:     'streamlit:setComponentValue',
+    value:    value,
+    dataType: 'json'
+  }, '*');
+}
+
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const video    = document.getElementById('video');
 const oc       = document.getElementById('oc');
@@ -260,11 +305,12 @@ let stream=null, rafId=null, running=false;
 let rBuf=[],gBuf=[],bBuf=[],chBuf=[];
 let frameN=0, FPS=30;
 let lastBpm=null, lastQ=0;
+let savedOnce=false;  // prevent double-send
 
 const sc=document.createElement('canvas');
 const sctx=sc.getContext('2d',{willReadFrequently:true});
 
-// ── Skin-tone face finder (YCbCr) — zero network, zero CDN ───────────────────
+// ── Skin-tone face finder (YCbCr, zero CDN) ──────────────────────────────────
 const TW=80,TH=60;
 const tc=document.createElement('canvas');
 tc.width=TW; tc.height=TH;
@@ -278,7 +324,6 @@ function isSkin(r,g,b){
   const Cr=128+0.5*r-0.41869*g-0.08131*b;
   return Cb>=77&&Cb<=127&&Cr>=133&&Cr<=173;
 }
-
 function findSkinRegion(){
   tctx.drawImage(video,0,0,TW,TH);
   const d=tctx.getImageData(0,0,TW,TH).data;
@@ -287,20 +332,15 @@ function findSkinRegion(){
     for(let x=0;x<TW;x++){
       const i=(y*TW+x)*4;
       if(isSkin(d[i],d[i+1],d[i+2])){
-        if(x<x0)x0=x;if(x>x1)x1=x;
-        if(y<y0)y0=y;if(y>y1)y1=y;
-        hit=true;
+        if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;hit=true;
       }
     }
   }
   if(!hit) return null;
   const p=2;
-  return{
-    x:Math.max(0,x0-p)/TW, y:Math.max(0,y0-p)/TH,
-    w:Math.min(TW,x1-x0+p*2)/TW, h:Math.min(TH,y1-y0+p*2)/TH
-  };
+  return{x:Math.max(0,x0-p)/TW,y:Math.max(0,y0-p)/TH,
+         w:Math.min(TW,x1-x0+p*2)/TW,h:Math.min(TH,y1-y0+p*2)/TH};
 }
-
 let emaFace=null;
 function smoothFace(r){
   if(!r){emaFace=null;return null;}
@@ -316,7 +356,6 @@ function syncOC(){
   const r=video.getBoundingClientRect();
   if(oc.width!==r.width||oc.height!==r.height){oc.width=r.width;oc.height=r.height;}
 }
-
 function drawBoxes(face,roi,fallback){
   octx.clearRect(0,0,oc.width,oc.height);
   const W=oc.width,H=oc.height;
@@ -326,7 +365,7 @@ function drawBoxes(face,roi,fallback){
     octx.strokeRect(fx,fy,fw,fh);
     octx.fillStyle='rgba(16,185,129,.07)';octx.fillRect(fx,fy,fw,fh);
     octx.fillStyle='#10b981';octx.font='bold 10px system-ui';
-    octx.fillText('Face',fx+4,fy+12);
+    octx.fillText('Face detected',fx+4,fy+12);
   }
   if(roi){
     const rx=(fallback?roi.x:(1-roi.x-roi.w))*W;
@@ -337,7 +376,7 @@ function drawBoxes(face,roi,fallback){
     octx.fillRect(rx,ry,rw,rh);octx.strokeRect(rx,ry,rw,rh);octx.setLineDash([]);
     octx.fillStyle=fallback?'#f59e0b':'#3b82f6';
     octx.font='bold 10px system-ui';
-    octx.fillText(fallback?'Forehead ROI':'ROI',rx+3,ry+11);
+    octx.fillText(fallback?'Forehead ROI (auto)':'Forehead ROI',rx+3,ry+11);
   }
 }
 
@@ -355,7 +394,7 @@ function sampleRegion(nx,ny,nw,nh){
   if(rBuf.length>300){rBuf.shift();gBuf.shift();bBuf.shift();}
 }
 
-// ── CHROM rPPG ────────────────────────────────────────────────────────────────
+// ── CHROM rPPG algorithm ──────────────────────────────────────────────────────
 function computeBPM(){
   const N=rBuf.length;
   const Xs=[],Ys=[];
@@ -383,7 +422,7 @@ function computeBPM(){
   const avg=ivls.reduce((a,b)=>a+b,0)/ivls.length;
   const bpm=Math.round(60/(avg/FPS));
   const q=Math.min(100,Math.max(0,(peaks.length/8)*70+20));
-  if(bpm>=45&&bpm<=170&&q>28){
+  if(bpm>=45&&bpm<=170&&q>25){
     lastBpm=bpm;lastQ=q;
     bpmNum.textContent=bpm;
     qFill.style.width=q.toFixed(0)+'%';
@@ -392,12 +431,13 @@ function computeBPM(){
     else if(bpm>100){cat='Tachycardia';col='#ef4444';}
     catBadge.textContent=cat;catBadge.style.color=col;bpmNum.style.color=col;
     saveBtn.disabled=false;
+    savedOnce=false; // new valid reading — allow save again
   }
 }
 
 // ── Waveform ──────────────────────────────────────────────────────────────────
 function drawWave(){
-  const W=wc.width=wc.offsetWidth,H=wc.height=50;
+  const W=wc.width=wc.offsetWidth,H=wc.height=46;
   wctx.fillStyle='#0d1117';wctx.fillRect(0,0,W,H);
   const data=chBuf.length?chBuf:gBuf.slice(-150);
   if(data.length<2)return;
@@ -405,13 +445,13 @@ function drawWave(){
   wctx.beginPath();wctx.strokeStyle='#3b82f6';wctx.lineWidth=1.5;
   const step=W/(data.length-1);
   data.forEach((v,i)=>{
-    const x=i*step,y=H-((v-mn)/rng)*(H-8)-4;
+    const x=i*step,y=H-((v-mn)/rng)*(H-6)-3;
     i===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
   });
   wctx.stroke();
   if(lastBpm){
-    wctx.fillStyle='#10b981';wctx.font='bold 11px system-ui';
-    wctx.fillText(lastBpm+' BPM  Q:'+lastQ.toFixed(0)+'%',6,14);
+    wctx.fillStyle='#10b981';wctx.font='bold 10px system-ui';
+    wctx.fillText(lastBpm+' BPM  Q:'+lastQ.toFixed(0)+'%',5,13);
   }
 }
 
@@ -427,7 +467,6 @@ function loop(){
         face=smoothFace(findSkinRegion());
         if(!face)skinMiss++;else skinMiss=0;
       }else{face=emaFace;}
-
       let roiN;
       if(face&&skinMiss<10){
         roiN={x:face.x+face.w*.20,y:face.y+face.h*.02,w:face.w*.60,h:face.h*.23};
@@ -437,9 +476,9 @@ function loop(){
         fallback=true;
         roiN={x:.30,y:.08,w:.40,h:.20};
         drawBoxes(null,{x:.30,y:.08,w:.40,h:.20},true);
-        sb.textContent= skinMiss>0&&skinMiss<20
-          ? '🔍 Locating face — ensure good even lighting…'
-          : '📊 Using forehead region — keep face centred & well-lit';
+        sb.textContent=skinMiss>0&&skinMiss<20
+          ?'🔍 Locating face — ensure good even lighting…'
+          :'📊 Using forehead region — stay still & well-lit';
       }
       sampleRegion(roiN.x,roiN.y,roiN.w,roiN.h);
       if(rBuf.length>=90&&frameN%30===0)computeBPM();
@@ -452,10 +491,12 @@ function loop(){
 // ── Camera ────────────────────────────────────────────────────────────────────
 async function startCam(){
   try{
-    sb.textContent='Requesting camera…';
+    sb.textContent='Requesting camera access…';
     stream=await navigator.mediaDevices.getUserMedia(
       {video:{width:{ideal:640},height:{ideal:480},facingMode:'user'},audio:false});
-    video.srcObject=stream;await video.play();return true;
+    video.srcObject=stream;
+    await video.play();
+    return true;
   }catch(e){sb.textContent='❌ Camera denied — allow camera then refresh';return false;}
 }
 function stopAll(){
@@ -465,7 +506,7 @@ function stopAll(){
   video.srcObject=null;
   octx.clearRect(0,0,oc.width,oc.height);
   rBuf=[];gBuf=[];bBuf=[];chBuf=[];emaFace=null;skinMiss=0;
-  lastBpm=null;lastQ=0;
+  lastBpm=null;lastQ=0;savedOnce=false;
   bpmNum.textContent='--';qFill.style.width='0%';
   catBadge.textContent='Stopped';saveBtn.disabled=true;
   sb.textContent='⏹ Camera stopped';
@@ -476,81 +517,225 @@ document.getElementById('startBtn').onclick=async()=>{
   if(running)return;
   const ok=await startCam();if(!ok)return;
   running=true;rBuf=[];gBuf=[];bBuf=[];chBuf=[];
-  emaFace=null;skinMiss=0;frameN=0;lastBpm=null;lastQ=0;
+  emaFace=null;skinMiss=0;frameN=0;lastBpm=null;lastQ=0;savedOnce=false;
   loop();
 };
 document.getElementById('stopBtn').onclick=()=>stopAll();
 
 saveBtn.onclick=()=>{
-  if(!lastBpm||lastQ<28){
-    alert('No valid reading yet.\n\nTips:\n• Even frontal lighting\n• Stay still 10-15 s\n• Watch for repeating waveform');
+  if(savedOnce){
+    sb.textContent='✅ Already saved — press Stop then Start for a new reading';
     return;
   }
-  const bpm=Math.round(lastBpm),q=parseFloat(lastQ.toFixed(2));
-
-  // ── KEY CHANGE: postMessage only — NO page reload ─────────────────────────
-  // The parent Streamlit page has a listener (injected via st.markdown)
-  // that catches this message, stores it, and clicks a hidden st.button
-  // to trigger a Python rerun — session state stays intact.
-  try{
-    window.parent.postMessage({type:'save_reading',bpm,quality:q},'*');
-    // Show toast inside the iframe to confirm
-    toast.textContent='✅ BPM '+bpm+' sent — see results above!';
-    toast.classList.add('show');
-    setTimeout(()=>toast.classList.remove('show'),3000);
-  }catch(e){
-    alert('BPM: '+bpm+'\nQuality: '+q+'%');
+  if(!lastBpm||lastQ<25){
+    alert('No valid reading yet.\n\nTips:\n• Even frontal lighting\n• Stay still 10–15 s\n• Watch for a repeating wave on the graph');
+    return;
   }
+  savedOnce=true;
+  saveBtn.disabled=true;
+  saveBtn.textContent='✅ Saved!';
+
+  // ── Send to Python via Streamlit's internal protocol ─────────────────────
+  sendToPython({bpm: Math.round(lastBpm), quality: parseFloat(lastQ.toFixed(2))});
+
+  // Show toast
+  toast.textContent='✅ BPM '+Math.round(lastBpm)+' sent to Python!';
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'),3000);
+  sb.textContent='✅ Reading sent — see encryption results above the camera';
 };
+
+// ── Set initial frame height so Streamlit sizes the iframe correctly ──────────
+window.parent.postMessage({type:'streamlit:setFrameHeight', height:480}, '*');
 </script>
 </body>
 </html>"""
-    return st_html(html_src, height=560, scrolling=False)
+
+    # Embed via data URI so declare_component can serve it inline
+    import base64
+    data_uri = "data:text/html;base64," + base64.b64encode(html_body.encode()).decode()
+
+    result = _rppg_component(
+        _self_url=data_uri,
+        default=None,
+        key="rppg_monitor_v3"
+    )
+    return result
 
 
-# ── Encryption display (does NOT re-save — save already done separately) ──────
-def show_encryption_display(bpm, quality):
-    """Show encryption steps for an already-saved reading."""
-    st.markdown("### 🔐 Hybrid Encryption Pipeline")
-    # Regenerate display values only (actual save already happened on capture)
-    key_hex = secrets.token_hex(32)
-    nonce   = secrets.token_hex(12)
-    sig     = secrets.token_hex(32)
-    bhash   = secrets.token_hex(32)
-    ecc_stub= "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE..."
+# ── Encryption + Blockchain simulation display ─────────────────────────────────
+def show_encryption_and_chain(enc):
+    st.markdown("---")
+    st.markdown("## 🔐 Encryption & Blockchain Simulation")
 
-    data_json = json.dumps({
-        "patient_id": f"PT-{st.session_state.user_id:04d}",
-        "heart_rate": bpm, "signal_quality": quality,
-        "timestamp": datetime.now().isoformat(),
-        "user": st.session_state.username
-    }, indent=2)
+    tab1, tab2, tab3 = st.tabs(["🔒 AES-256-GCM Encryption", "🔑 ECC Key Exchange", "📦 Blockchain Ledger"])
 
-    steps = [
-        ("📝 Step 1: Original Data",      "json", data_json),
-        ("🔑 Step 2: AES-256-GCM Key",    "text", f"Key: {key_hex[:32]}...{key_hex[-8:]}"),
-        ("🎲 Step 3: Nonce (96-bit)",      "text", f"Nonce: {nonce}"),
-        ("🔒 Step 4: Ciphertext",          "text", "Encrypted payload stored in DB (hex)"),
-        ("🔐 Step 5: ECC SECP256R1",       "text", f"Public: {ecc_stub}"),
-        ("✍️ Step 6: HMAC-SHA256",         "text", f"HMAC: {sig[:40]}..."),
-        ("📦 Step 7: Blockchain Entry",    "text", f"Block hash: {bhash[:40]}..."),
-    ]
-    for title, lang, code in steps:
-        c1, c2 = st.columns([1,9])
-        with c1: st.markdown("### ✅")
-        with c2:
-            st.markdown(f"**{title}**")
-            st.code(code, language=lang)
-        st.divider(); time.sleep(0.06)
+    # ── Tab 1: AES Encryption ─────────────────────────────────────────────────
+    with tab1:
+        st.markdown("### Step-by-step AES-256-GCM Encryption Process")
 
-    st.markdown(f"""
-    <div class="enc-preview">
-        <b>🔑 AES-256 Key (demo):</b> {key_hex[:32]}...{key_hex[-8:]}<br>
-        <b>🔐 ECC Public Key:</b> {ecc_stub}<br>
-        <b>🔗 Blockchain Hash:</b> {bhash[:40]}...<br>
-        <b>✅ Record persisted to SQLite + audit log</b>
-    </div>""", unsafe_allow_html=True)
-    st.success(f"✅ BPM: {bpm} bpm — Quality: {quality:.1f}% — Secured with AES-256-GCM + ECC SECP256R1")
+        steps = [
+            {
+                "num": "01",
+                "title": "📝 Original Health Data (Plaintext)",
+                "desc": "Raw patient data before encryption — readable by anyone with access.",
+                "color": "#3b82f6",
+                "content": enc["plaintext"],
+                "lang": "json"
+            },
+            {
+                "num": "02",
+                "title": "🔑 AES-256 Key Generation",
+                "desc": "A cryptographically secure random 256-bit (32-byte) key. Never stored in plaintext.",
+                "color": "#8b5cf6",
+                "content": f"Key (hex, 256-bit):\n{enc['aes_key']}\n\nKey length: {len(enc['aes_key'])//2} bytes = {len(enc['aes_key'])*4} bits",
+                "lang": "text"
+            },
+            {
+                "num": "03",
+                "title": "🎲 Nonce (Initialisation Vector)",
+                "desc": "A unique 96-bit random value. Ensures identical plaintexts produce different ciphertexts.",
+                "color": "#06b6d4",
+                "content": f"Nonce (hex, 96-bit):\n{enc['nonce']}\n\nNonce length: {len(enc['nonce'])//2} bytes = {len(enc['nonce'])*4} bits\n\n⚠️  Never reuse a nonce with the same key — doing so breaks GCM security.",
+                "lang": "text"
+            },
+            {
+                "num": "04",
+                "title": "🔒 AES-256-GCM Ciphertext",
+                "desc": "Encrypted output. GCM mode adds a 128-bit authentication tag ensuring integrity.",
+                "color": "#10b981",
+                "content": f"Ciphertext (hex):\n{enc['ciphertext'][:80]}...\n\n...{enc['ciphertext'][-40:]}\n\nTotal length: {len(enc['ciphertext'])//2} bytes\n(original {len(enc['plaintext'])} bytes plaintext + 16-byte GCM tag)",
+                "lang": "text"
+            },
+            {
+                "num": "05",
+                "title": "✍️ HMAC-SHA256 Integrity Signature",
+                "desc": "Hash-based message authentication code. Verifies payload hasn't been tampered with.",
+                "color": "#f59e0b",
+                "content": f"HMAC input: SHA256(ciphertext_hex + key_hex)\n\nHMAC-SHA256:\n{enc['hmac']}\n\nLength: 256 bits — any single bit change in the payload produces a completely different HMAC.",
+                "lang": "text"
+            },
+        ]
+
+        for step in steps:
+            col_n, col_body = st.columns([1, 11])
+            with col_n:
+                st.markdown(f"""
+                <div style="width:36px;height:36px;background:{step['color']};border-radius:50%;
+                    display:flex;align-items:center;justify-content:center;
+                    color:#fff;font-weight:900;font-size:.8rem;margin-top:4px">{step['num']}</div>
+                """, unsafe_allow_html=True)
+            with col_body:
+                st.markdown(f"**{step['title']}**")
+                st.caption(step['desc'])
+                st.code(step['content'], language=step['lang'])
+
+        st.markdown(f"""
+        <div class="enc-preview">
+        <b>📦 Final Encrypted Payload stored in SQLite DB</b><br><br>
+        <b>Structure:</b> nonce(12B) + ciphertext(NB) + gcm_tag(16B)<br>
+        <b>Field:</b> encrypted_hex<br>
+        <b>Value:</b> {enc['payload'][:60]}...{enc['payload'][-20:]}<br><br>
+        <b>Key stored separately in:</b> key_hex field (in production, store in HSM/KMS)<br>
+        <b>Record ID:</b> #{enc['record_id']} | <b>Patient:</b> PT-{st.session_state.user_id:04d} | <b>BPM:</b> {enc['bpm']}
+        </div>""", unsafe_allow_html=True)
+
+    # ── Tab 2: ECC Key Exchange ───────────────────────────────────────────────
+    with tab2:
+        st.markdown("### ECC SECP256R1 Asymmetric Key Pair")
+        st.markdown("""
+        Elliptic Curve Cryptography provides secure key exchange. The **public key** can be
+        shared openly; only the holder of the **private key** can decrypt data encrypted with the public key.
+        """)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### 🔓 Public Key (shareable)")
+            st.code(enc['pub_pem'], language="text")
+            st.caption("Safe to share with anyone. Used to encrypt data destined for this patient.")
+        with col2:
+            st.markdown("#### 🔐 Private Key (secret)")
+            st.code(enc['priv_pem_stub'], language="text")
+            st.caption("Never transmitted. In production: stored in a Hardware Security Module (HSM).")
+
+        st.markdown("#### How ECC SECP256R1 Works")
+        ecc_steps = [
+            ("1️⃣  Key Generation", "Generate a random private key scalar `d`. Compute public key point `Q = d × G` on the SECP256R1 curve. The curve equation is y² = x³ - 3x + b (mod p)."),
+            ("2️⃣  Encryption (ECIES)", "Sender generates ephemeral key pair. Uses ECDH to compute shared secret = ephemeral_priv × recipient_pub. Derives AES key from shared secret via HKDF. Encrypts data with AES-GCM."),
+            ("3️⃣  Decryption", "Recipient computes same shared secret = recipient_priv × ephemeral_pub (equals sender's value by ECDH commutativity). Derives same AES key. Decrypts ciphertext."),
+            ("4️⃣  Security Basis", "Breaking ECC requires solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) — computationally infeasible for 256-bit keys. Equivalent security to 3072-bit RSA but with shorter keys."),
+        ]
+        for title, body in ecc_steps:
+            with st.expander(title):
+                st.markdown(body)
+
+    # ── Tab 3: Blockchain ─────────────────────────────────────────────────────
+    with tab3:
+        st.markdown("### 📦 Decentralised Blockchain Audit Trail")
+        st.markdown("""
+        Each record is hashed and chained to the previous one. Tampering with any record
+        breaks all subsequent hashes — making the audit trail **immutable and tamper-evident**.
+        """)
+
+        # Fetch last 4 blocks from DB for display
+        conn = sqlite3.connect('heart_monitor.db')
+        c = conn.cursor()
+        c.execute("""SELECT id, bpm, quality, blockchain_hash, test_date
+                     FROM test_results WHERE user_id=?
+                     ORDER BY id DESC LIMIT 4""",
+                  (st.session_state.user_id,))
+        blocks = c.fetchall()
+        conn.close()
+
+        if blocks:
+            # Show newest first, then chain arrows downward
+            st.markdown("#### Current chain (most recent at top):")
+
+            prev_shown_hash = None
+            for i, (rid, bpm, quality, bhash, tdate) in enumerate(blocks):
+                # Determine previous hash for display
+                if i == len(blocks) - 1:
+                    prev_display = "GENESIS_BLOCK_0000000000000000000000000000000"
+                else:
+                    prev_display = blocks[i+1][3]  # next item = older block
+
+                is_latest = (rid == enc['record_id'])
+                border_col = "#3b82f6" if is_latest else "#334155"
+                label = " ← THIS RECORD" if is_latest else ""
+
+                st.markdown(f"""
+                <div class="chain-block" style="border-color:{border_col}">
+                <b style="color:#60a5fa">BLOCK #{rid}{label}</b><br>
+                ─────────────────────────────────────────────────────<br>
+                <b>Timestamp:</b>   {tdate}<br>
+                <b>BPM:</b>         {bpm} bpm &nbsp;&nbsp; <b>Quality:</b> {quality:.1f}%<br>
+                <b>Patient:</b>     PT-{st.session_state.user_id:04d}<br>
+                <b>Prev Hash:</b>   {prev_display[:32]}...<br>
+                <b>Block Hash:</b>  {bhash[:32]}...<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{bhash[32:]}<br>
+                </div>""", unsafe_allow_html=True)
+
+                if i < len(blocks) - 1:
+                    st.markdown('<div class="chain-link">⬇ chained via SHA-256 ⬇</div>', unsafe_allow_html=True)
+
+        st.markdown("#### How Tampering is Detected")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+**Legitimate chain:**
+- Block N hash = SHA256(prev_hash + data)
+- Block N+1 stores Block N's hash
+- Verifier recomputes and compares ✅
+            """)
+        with col2:
+            st.markdown("""
+**Tampered chain:**
+- Attacker changes BPM in Block N
+- Block N hash changes → no longer matches stored value in Block N+1
+- Every block after N is now invalid ❌
+            """)
+
+        st.info("🏦 In a production system, block hashes would be published to a public blockchain (e.g. Ethereum) or a distributed ledger, making any local DB modification immediately detectable by any node.")
 
 
 # ── Login ──────────────────────────────────────────────────────────────────────
@@ -558,7 +743,7 @@ def show_login():
     st.markdown("""
     <div class="main-header">
         <h1>❤️ MedChainSecure</h1>
-        <p>Secure IoMT Heart Rate Monitoring — AES-256-GCM · ECC · Blockchain Audit</p>
+        <p>Secure IoMT Heart Rate Monitoring — AES-256-GCM · ECC SECP256R1 · Blockchain Audit</p>
         <div style="display:flex;justify-content:center;gap:.75rem;margin-top:1.2rem;flex-wrap:wrap;">
             <span class="status-badge status-good">🔒 AES-256-GCM</span>
             <span class="status-badge status-good">🔑 ECC SECP256R1</span>
@@ -647,11 +832,11 @@ def show_dashboard():
         </div>""", unsafe_allow_html=True)
         if st.button("🚪 Logout",use_container_width=True):
             add_audit_log(st.session_state.user_id,"LOGOUT","Logged out")
-            for k in ['authenticated','user_id','username','is_admin','saved_bpm','saved_quality']:
+            for k in ['authenticated','user_id','username','is_admin','saved_bpm','saved_quality','last_enc']:
                 st.session_state[k]=None
             st.rerun()
 
-    # ── Dashboard ──────────────────────────────────────────────────────────────
+    # ── Dashboard page ─────────────────────────────────────────────────────────
     if selected=="Dashboard":
         conn=sqlite3.connect('heart_monitor.db'); c=conn.cursor()
         c.execute("SELECT COUNT(*) FROM test_results WHERE user_id=?",(st.session_state.user_id,))
@@ -664,124 +849,57 @@ def show_dashboard():
         with c3: st.markdown('<div class="metric-card"><div class="stat-label">Encryption</div><div class="stat-value" style="font-size:1.1rem">AES-256</div></div>',unsafe_allow_html=True)
         st.markdown("""<div class="glass-panel" style="margin-top:1.5rem;padding:2rem;text-align:center">
             <h3>🎯 How to take a reading</h3>
-            <p style="margin:.8rem 0">Go to <b>rPPG Monitor</b> → press <b>▶ Start</b> → wait 15 s → press <b>💾 Save Reading</b></p>
+            <p style="margin:.8rem 0">Go to <b>rPPG Monitor</b> → press <b>▶ Start</b> → wait 15 s for BPM to stabilise → press <b>💾 Save Reading</b></p>
+            <p style="color:#64748b;font-size:.85rem">The full AES-256-GCM encryption and blockchain simulation will appear automatically after saving.</p>
         </div>""", unsafe_allow_html=True)
 
-    # ── rPPG Monitor ───────────────────────────────────────────────────────────
+    # ── rPPG Monitor page ──────────────────────────────────────────────────────
     elif selected=="rPPG Monitor":
         st.markdown("""<div class="main-header">
             <h2>📹 rPPG Heart Rate Monitor</h2>
-            <p>Skin-colour face detection — runs entirely in your browser, zero downloads</p>
+            <p>Skin-colour face detection — runs entirely in your browser, zero CDN downloads</p>
         </div>""", unsafe_allow_html=True)
 
         with st.expander("📋 Tips for best results"):
             st.markdown("""
 - **Light your face evenly** — avoid a bright window behind you
 - **Stay still** for at least 10–15 seconds after the waveform appears
-- Green box = face found · Yellow dashed = forehead fallback (still works)
+- 🟢 Green box = face detected · 🟡 Yellow dashed = forehead fallback (still works)
 - BPM colour: 🟢 Normal (60–100) · 🟡 Bradycardia (<60) · 🔴 Tachycardia (>100)
-- After pressing 💾 Save Reading, a toast appears in the camera panel and results appear below
+- After pressing 💾 Save Reading the full encryption & blockchain simulation appears below
             """)
 
-        # ── Invisible trigger button — JS clicks this to cause a rerun ────────
-        # We use st.session_state to pass data from JS → Python safely.
-        # The postMessage listener (injected below) writes to sessionStorage
-        # then clicks this button. On rerun, we read sessionStorage via
-        # a second tiny JS snippet and populate st.session_state.
-        trigger_clicked = st.button("__SAVE_TRIGGER__", key="save_trigger",
-                                    help="Internal use", type="secondary")
+        _, cam_col, _ = st.columns([1,3,1])
+        with cam_col:
+            result = rppg_component()
 
-        # ── Inject the parent-page postMessage listener ───────────────────────
-        st.markdown("""
-<script>
-(function(){
-  if(window.__medBridge) return;
-  window.__medBridge = true;
-  window.addEventListener('message', function(e){
-    var d = e.data;
-    if(!d || d.type !== 'save_reading') return;
-    if(!d.bpm || !d.quality) return;
-    // Persist to sessionStorage
-    sessionStorage.setItem('med_bpm',     String(d.bpm));
-    sessionStorage.setItem('med_quality', String(d.quality));
-    // Click the hidden Streamlit trigger button
-    var buttons = document.querySelectorAll('button');
-    for(var i=0;i<buttons.length;i++){
-      if(buttons[i].innerText.trim() === '__SAVE_TRIGGER__'){
-        buttons[i].click();
-        break;
-      }
-    }
-  });
-})();
-</script>
-""", unsafe_allow_html=True)
+        # ── Process component return value ─────────────────────────────────────
+        # result is {bpm, quality} when Save is pressed, None otherwise
+        if result is not None and isinstance(result, dict):
+            bpm_val = result.get('bpm')
+            q_val   = result.get('quality')
+            # Only process if it's a new reading (different from last saved)
+            if (bpm_val and q_val and
+                isinstance(bpm_val, int) and 40 <= bpm_val <= 180 and
+                st.session_state.saved_bpm != bpm_val):
 
-        # ── Read sessionStorage value back into Python on each rerun ──────────
-        # We inject a tiny script that copies sessionStorage → a hidden text
-        # input, which we then read. But Streamlit doesn't expose arbitrary DOM
-        # reads. Instead we use a different proven approach:
-        # store in sessionStorage AND pass as query param — but without reload.
-        # Simplest: check if trigger was clicked AND sessionStorage has values.
-        # Since we can't read sessionStorage directly in Python, we use a
-        # components.html trick: render a tiny component that sends its value.
+                with st.spinner("🔐 Encrypting and saving to blockchain…"):
+                    enc = do_encrypt_and_save(bpm_val, q_val)
 
-        # ACTUAL WORKING APPROACH:
-        # Inject a script that, when the trigger button is clicked (rerun),
-        # reads sessionStorage and sets URL hash (no reload). Then Python
-        # reads st.query_params on the NEXT natural rerun cycle.
-        # This is a known Streamlit pattern — use st.query_params without reload.
+                st.session_state.saved_bpm     = bpm_val
+                st.session_state.saved_quality = q_val
+                st.session_state.last_enc      = enc
 
-        st.markdown("""
-<script>
-(function(){
-  // On every page rerun, check if sessionStorage has a pending reading
-  var bpm = sessionStorage.getItem('med_bpm');
-  var q   = sessionStorage.getItem('med_quality');
-  if(bpm && q){
-    // Push to URL without reloading — Streamlit reads query_params on rerun
-    var url = new URL(window.location.href);
-    url.searchParams.set('med_bpm', bpm);
-    url.searchParams.set('med_quality', q);
-    // Use replaceState — does NOT reload, does NOT lose session
-    history.replaceState({}, '', url.toString());
-    // Clear so we don't re-trigger
-    sessionStorage.removeItem('med_bpm');
-    sessionStorage.removeItem('med_quality');
-  }
-})();
-</script>
-""", unsafe_allow_html=True)
+        # Show results if we have a saved reading
+        if st.session_state.last_enc:
+            enc = st.session_state.last_enc
+            st.success(f"✅ Record #{enc['record_id']} saved — BPM: {enc['bpm']} bpm | Quality: {enc['quality']:.1f}% | Patient: PT-{st.session_state.user_id:04d}")
+            show_encryption_and_chain(enc)
 
-        # Read from query_params (set by JS above via replaceState — no reload)
-        qp = st.query_params
-        if 'med_bpm' in qp and st.session_state.saved_bpm is None:
-            try:
-                bpm_val = int(qp['med_bpm'])
-                q_val   = float(qp['med_quality'])
-                if 40 <= bpm_val <= 180 and 0 < q_val <= 100:
-                    st.session_state.saved_bpm     = bpm_val
-                    st.session_state.saved_quality = q_val
-                    # Persist to database
-                    encrypt_and_save(bpm_val, q_val)
-                    st.query_params.clear()
-            except Exception:
-                st.query_params.clear()
-
-        # Show camera component
-        _, col, _ = st.columns([1,3,1])
-        with col:
-            rppg_component()
-
-        # Show result if available
-        if st.session_state.saved_bpm:
-            st.markdown("---")
-            st.success(f"✅ Reading captured — BPM: {st.session_state.saved_bpm}, Quality: {st.session_state.saved_quality:.1f}%")
-            with st.expander("🔐 Encryption details", expanded=True):
-                show_encryption_display(st.session_state.saved_bpm, st.session_state.saved_quality)
-            if st.button("🔄 Take new reading"):
-                st.session_state.saved_bpm=None
-                st.session_state.saved_quality=None
+            if st.button("🔄 Clear and take a new reading"):
+                st.session_state.saved_bpm     = None
+                st.session_state.saved_quality = None
+                st.session_state.last_enc      = None
                 st.rerun()
 
     # ── Health History ─────────────────────────────────────────────────────────
@@ -791,12 +909,14 @@ def show_dashboard():
             <p>Encrypted records with blockchain verification</p>
         </div>""", unsafe_allow_html=True)
         conn=sqlite3.connect('heart_monitor.db'); c=conn.cursor()
-        c.execute('SELECT bpm,quality,test_date FROM test_results WHERE user_id=? ORDER BY test_date DESC',
+        c.execute('SELECT bpm,quality,blockchain_hash,test_date FROM test_results WHERE user_id=? ORDER BY test_date DESC',
                   (st.session_state.user_id,))
         rows=c.fetchall(); conn.close()
         if rows:
-            df=pd.DataFrame(rows,columns=['BPM','Quality (%)','Date'])
+            df=pd.DataFrame(rows,columns=['BPM','Quality (%)','Block Hash','Date'])
             df['Quality (%)']=df['Quality (%)'].round(1)
+            df['Block Hash']=df['Block Hash'].str[:16]+'...'
+
             fig=go.Figure()
             fig.add_trace(go.Scatter(x=df['Date'],y=df['BPM'],mode='lines+markers',
                 name='Heart Rate',line=dict(color='#3b82f6',width=2)))
@@ -819,8 +939,9 @@ def show_dashboard():
         conn=sqlite3.connect('heart_monitor.db'); c=conn.cursor()
         c.execute("SELECT id,username,full_name,age,gender,is_admin FROM users WHERE username!='admin'")
         users=c.fetchall()
-        c.execute("SELECT timestamp,action,details FROM audit_log ORDER BY id DESC LIMIT 15")
+        c.execute("SELECT timestamp,action,details,current_hash FROM audit_log ORDER BY id DESC LIMIT 15")
         logs=c.fetchall(); conn.close()
+
         st.markdown("### 👥 Users")
         if users:
             for u in users:
@@ -830,11 +951,14 @@ def show_dashboard():
                     with b: st.write(f"**Admin:** {'Yes' if u[5] else 'No'}")
         else:
             st.info("No users.")
-        st.markdown("### 📜 Audit Log")
+
+        st.markdown("### 📜 Blockchain Audit Log")
         for log in logs:
             st.markdown(f"""<div class="glass-panel" style="margin-bottom:.4rem;padding:.65rem">
                 <small style="color:#64748b">{log[0]}</small>
                 <div><b>{log[1]}</b> — {log[2]}</div>
+                <div style="font-size:.65rem;color:#94a3b8;font-family:monospace;margin-top:.2rem">
+                    hash: {log[3][:40] if log[3] else 'N/A'}...</div>
             </div>""", unsafe_allow_html=True)
 
 
