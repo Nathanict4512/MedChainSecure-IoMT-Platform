@@ -1,4 +1,4 @@
-# app.py - Complete MedChainSecure with Fixed Face Detection and Centered Layout
+# app.py - Complete MedChainSecure with Visible Buttons
 import streamlit as st
 import sqlite3
 import hashlib
@@ -15,7 +15,6 @@ from cryptography.hazmat.backends import default_backend
 import bcrypt
 from streamlit.components.v1 import html
 import time
-import base64
 
 st.set_page_config(
     page_title="MedChainSecure - Real rPPG Heart Monitor",
@@ -36,7 +35,6 @@ st.markdown("""
         --accent-primary: #3b82f6;
         --accent-secondary: #06b6d4;
         --accent-tertiary: #10b981;
-        --accent-warning: #f59e0b;
         --border-color: #e2e8f0;
     }
     
@@ -48,7 +46,6 @@ st.markdown("""
         border-radius: 1rem;
         margin-bottom: 2rem;
         border: 1px solid var(--border-color);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     
     .glass-panel {
@@ -56,7 +53,6 @@ st.markdown("""
         border: 1px solid var(--border-color);
         border-radius: 0.75rem;
         padding: 1rem;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }
     
     .metric-card {
@@ -84,38 +80,7 @@ st.markdown("""
     .status-warning { background: #fed7aa; color: #9a3412; }
     .status-info { background: #dbeafe; color: #1e40af; }
     
-    .progress-step {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        padding: 0.75rem;
-        margin: 0.5rem 0;
-        border-radius: 0.5rem;
-        background: var(--bg-primary);
-        border-left: 3px solid var(--accent-primary);
-    }
-    
-    .progress-step.completed {
-        border-left-color: var(--accent-tertiary);
-        background: #f0fdf4;
-    }
-    
-    .step-number {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: var(--accent-primary);
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    
-    .step-number.completed { background: var(--accent-tertiary); }
-    
-    .btn-primary {
+    .btn-streamlit {
         background: linear-gradient(135deg, #3b82f6, #06b6d4);
         color: white;
         padding: 0.625rem 1.25rem;
@@ -123,7 +88,6 @@ st.markdown("""
         font-weight: 600;
         border: none;
         cursor: pointer;
-        transition: all 0.3s ease;
         width: 100%;
     }
     
@@ -135,31 +99,99 @@ st.markdown("""
         padding: 0.75rem;
         border-radius: 0.5rem;
         overflow-x: auto;
-        white-space: pre-wrap;
-        word-break: break-all;
     }
     
-    /* Centered layout */
-    .two-column-layout {
+    .camera-container {
+        background: #0f172a;
+        border-radius: 1rem;
+        overflow: hidden;
+        aspect-ratio: 16/9;
+        position: relative;
+    }
+    
+    .camera-placeholder {
         display: flex;
-        gap: 2rem;
-        align-items: flex-start;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: white;
+        background: #1e293b;
     }
     
-    .camera-column {
-        flex: 2;
+    .control-buttons {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1rem;
+        justify-content: center;
     }
     
-    .controls-column {
-        flex: 1;
-        position: sticky;
-        top: 1rem;
+    .control-btn {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 1rem;
     }
     
-    @media (max-width: 768px) {
-        .two-column-layout {
-            flex-direction: column;
-        }
+    .btn-start { background: #3b82f6; color: white; }
+    .btn-start:hover { background: #2563eb; transform: translateY(-1px); }
+    .btn-stop { background: #ef4444; color: white; }
+    .btn-stop:hover { background: #dc2626; transform: translateY(-1px); }
+    .btn-save { background: #10b981; color: white; }
+    .btn-save:hover { background: #059669; transform: translateY(-1px); }
+    
+    .bpm-card {
+        background: linear-gradient(135deg, #3b82f6, #06b6d4);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        color: white;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    
+    .bpm-value {
+        font-size: 4rem;
+        font-weight: bold;
+    }
+    
+    .quality-bar {
+        height: 0.5rem;
+        background: rgba(255,255,255,0.3);
+        border-radius: 0.25rem;
+        overflow: hidden;
+        margin: 0.75rem 0;
+    }
+    
+    .quality-fill {
+        height: 100%;
+        background: #10b981;
+        transition: width 0.3s;
+        width: 0%;
+    }
+    
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+    
+    .stat-box {
+        background: white;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        text-align: center;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .status-chip {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        background: rgba(255,255,255,0.2);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -177,6 +209,8 @@ if 'saved_bpm' not in st.session_state:
     st.session_state.saved_bpm = None
 if 'saved_quality' not in st.session_state:
     st.session_state.saved_quality = None
+if 'camera_active' not in st.session_state:
+    st.session_state.camera_active = False
 
 def init_db():
     conn = sqlite3.connect('heart_monitor.db')
@@ -243,82 +277,69 @@ def add_audit_log(user_id, action, details):
     conn.close()
 
 def encrypt_with_simulation(plaintext, bpm, quality):
-    """Simulate encryption with detailed progress"""
-    steps = []
-    
-    steps.append({'name': 'AES-256 Key Generation', 'description': 'Generating cryptographically secure random 256-bit key using CSPRNG', 'status': 'completed', 'data': None})
-    steps.append({'name': 'Nonce Generation', 'description': 'Creating 96-bit unique nonce for GCM mode', 'status': 'completed', 'data': None})
-    steps.append({'name': 'AES-256-GCM Encryption', 'description': 'Authenticated encryption with associated data (AEAD)', 'status': 'completed', 'data': None})
-    steps.append({'name': 'ECC SECP256R1 Key Pair', 'description': 'Generating elliptic curve key pair for secure key exchange', 'status': 'completed', 'data': None})
-    steps.append({'name': 'HMAC-SHA256 Signing', 'description': 'Creating HMAC signature for integrity verification', 'status': 'completed', 'data': None})
-    steps.append({'name': 'Blockchain Ledger Entry', 'description': 'Adding record to immutable audit trail', 'status': 'completed', 'data': None})
-    steps.append({'name': '3-Layer Storage Distribution', 'description': 'Writing to Local SQLite + Remote Backup + Blockchain', 'status': 'completed', 'data': None})
-    
     key = secrets.token_bytes(32)
     key_hex = key.hex()
-    steps[0]['data'] = f"Key: {key_hex[:32]}...{key_hex[-8:]} (256 bits)"
     
     nonce = secrets.token_bytes(12)
-    nonce_hex = nonce.hex()
-    steps[1]['data'] = f"Nonce: {nonce_hex} (96 bits)"
-    
     cipher = AESGCM(key)
     ciphertext = cipher.encrypt(nonce, plaintext.encode(), None)
     payload = (nonce + ciphertext).hex()
-    steps[2]['data'] = f"Ciphertext length: {len(ciphertext)} bytes | Tag: {ciphertext[-16:].hex()[:16]}..."
     
     private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
     public_key = private_key.public_key()
     public_pem = public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
-    steps[3]['data'] = f"Public Key: {public_pem[:50].decode()}... | Curve: SECP256R1"
     
     hmac_data = f"{payload}{key_hex}{bpm}{quality}"
     hmac_sig = hashlib.sha256(hmac_data.encode()).hexdigest()
-    steps[4]['data'] = f"HMAC: {hmac_sig[:32]}... (SHA-256)"
     
     timestamp = datetime.now().isoformat()
     blockchain_data = f"GENESIS{st.session_state.user_id}SAVE_RESULT{timestamp}{hmac_sig}"
     blockchain_hash = hashlib.sha256(blockchain_data.encode()).hexdigest()
-    steps[5]['data'] = f"Block Hash: {blockchain_hash[:32]}... | Chain Verified"
     
-    steps[6]['data'] = f"Local: ✓ | Remote: ✓ | Blockchain: ✓"
+    conn = sqlite3.connect('heart_monitor.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO test_results (user_id, bpm, quality, encrypted_hex, key_hex, ecc_public_key, aes_key_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (st.session_state.user_id, bpm, quality, payload, key_hex, public_pem[:100].decode(), hmac_sig[:32]))
+    conn.commit()
+    conn.close()
     
-    return key_hex, payload, steps, public_pem.decode(), hmac_sig
+    add_audit_log(st.session_state.user_id, "SAVE_RESULT", f"BPM: {bpm}, Quality: {quality}%")
+    
+    return key_hex, payload, public_pem.decode(), hmac_sig, blockchain_hash
 
-# Complete rPPG Component with improved face detection
-def rppg_monitor_component():
-    rppg_html = """
+# rPPG Camera Component with JavaScript
+def rppg_camera_component():
+    """Camera component that sends BPM data back to Streamlit"""
+    
+    component_html = """
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>rPPG Heart Rate Monitor</title>
+        <title>Camera Feed</title>
         <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2/dist/face-detection.min.js"></script>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
-                font-family: system-ui, -apple-system, sans-serif;
                 background: transparent;
-                padding: 0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             }
-            .monitor-container {
-                width: 100%;
-            }
-            .video-wrapper {
-                position: relative;
+            .camera-wrapper {
                 background: #0f172a;
-                border-radius: 1rem;
+                border-radius: 16px;
                 overflow: hidden;
-                aspect-ratio: 4/3;
+                position: relative;
             }
-            #video {
+            video {
                 width: 100%;
-                height: 100%;
-                object-fit: cover;
+                height: auto;
                 transform: scaleX(-1);
+                display: block;
             }
-            .face-overlay {
+            .face-box {
                 position: absolute;
                 border: 3px solid #10b981;
                 border-radius: 12px;
@@ -326,7 +347,7 @@ def rppg_monitor_component():
                 pointer-events: none;
                 box-shadow: 0 0 0 2px rgba(16,185,129,0.2);
             }
-            .roi-overlay {
+            .roi-box {
                 position: absolute;
                 border: 2px solid #3b82f6;
                 background: rgba(59,130,246,0.15);
@@ -334,579 +355,312 @@ def rppg_monitor_component():
                 display: none;
                 pointer-events: none;
             }
-            .face-status {
+            .status-text {
                 text-align: center;
-                padding: 0.5rem;
-                font-size: 0.75rem;
+                padding: 8px;
+                font-size: 12px;
                 color: #64748b;
-                margin-top: 0.5rem;
-            }
-            .bpm-card {
-                background: linear-gradient(135deg, #3b82f6, #06b6d4);
-                border-radius: 1rem;
-                padding: 1rem;
-                color: white;
-                margin-bottom: 1rem;
-            }
-            .bpm-value {
-                font-size: 3rem;
-                font-weight: bold;
-                text-align: center;
-            }
-            .bpm-label {
-                font-size: 0.7rem;
-                text-align: center;
-                opacity: 0.9;
-            }
-            .quality-bar {
-                height: 0.25rem;
-                background: rgba(255,255,255,0.3);
-                border-radius: 0.125rem;
-                overflow: hidden;
-                margin: 0.5rem 0;
-            }
-            .quality-fill {
-                height: 100%;
-                background: #10b981;
-                transition: width 0.3s;
-                width: 0%;
-            }
-            .status-chip {
-                display: inline-block;
-                padding: 0.25rem 0.75rem;
-                border-radius: 9999px;
-                font-size: 0.7rem;
-                font-weight: 600;
-                background: rgba(255,255,255,0.2);
-            }
-            .stats-grid {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 0.5rem;
-                margin: 1rem 0;
-            }
-            .stat-box {
-                background: white;
-                padding: 0.5rem;
-                border-radius: 0.5rem;
-                text-align: center;
-                border: 1px solid #e2e8f0;
-            }
-            .stat-label-sm {
-                font-size: 0.6rem;
-                color: #64748b;
-                text-transform: uppercase;
-            }
-            .stat-value-sm {
-                font-size: 1rem;
-                font-weight: bold;
-                color: #1e293b;
-            }
-            .waveform-container {
-                background: #0f172a;
-                border-radius: 0.5rem;
-                padding: 0.5rem;
-                margin: 1rem 0;
-            }
-            canvas {
-                width: 100%;
-                height: 60px;
-                display: block;
-            }
-            .btn-group {
-                display: flex;
-                flex-direction: column;
-                gap: 0.5rem;
-                margin-top: 1rem;
-            }
-            .btn {
-                padding: 0.625rem;
-                border: none;
-                border-radius: 0.5rem;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.2s;
-                font-size: 0.875rem;
-            }
-            .btn-start { background: #3b82f6; color: white; }
-            .btn-start:hover { background: #2563eb; transform: translateY(-1px); }
-            .btn-stop { background: #ef4444; color: white; }
-            .btn-stop:hover { background: #dc2626; transform: translateY(-1px); }
-            .btn-save { background: #10b981; color: white; }
-            .btn-save:hover { background: #059669; transform: translateY(-1px); }
-            .instruction {
-                background: #f1f5f9;
-                padding: 0.5rem;
-                border-radius: 0.5rem;
-                font-size: 0.7rem;
-                color: #475569;
-                text-align: center;
-                margin-top: 0.5rem;
             }
         </style>
     </head>
     <body>
-        <div class="monitor-container">
-            <div class="bpm-card">
-                <div class="bpm-label">Current Heart Rate</div>
-                <div class="bpm-value" id="bpmValue">--</div>
-                <div style="text-align: center; margin: 0.25rem 0;">
-                    <span class="status-chip" id="bpmCategory">Waiting...</span>
-                </div>
-                <div class="quality-bar">
-                    <div class="quality-fill" id="qualityFill"></div>
-                </div>
-                <div style="font-size: 0.65rem; text-align: center;" id="qualityText">Signal Quality: --%</div>
-            </div>
-            
-            <div class="video-wrapper">
+        <div>
+            <div class="camera-wrapper">
                 <video id="video" autoplay playsinline muted></video>
-                <div id="faceOverlay" class="face-overlay"></div>
-                <div id="roiOverlay" class="roi-overlay"></div>
+                <div id="faceBox" class="face-box"></div>
+                <div id="roiBox" class="roi-box"></div>
             </div>
-            
-            <div class="face-status" id="faceStatus">
-                <span>📷 Click "Start Camera" to begin monitoring</span>
-            </div>
-            
-            <div class="stats-grid">
-                <div class="stat-box">
-                    <div class="stat-label-sm">Min BPM</div>
-                    <div class="stat-value-sm" id="minBpm">--</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label-sm">Avg BPM</div>
-                    <div class="stat-value-sm" id="avgBpm">--</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label-sm">Max BPM</div>
-                    <div class="stat-value-sm" id="maxBpm">--</div>
-                </div>
-            </div>
-            
-            <div class="waveform-container">
-                <canvas id="waveformCanvas" width="600" height="60"></canvas>
-            </div>
-            
-            <div class="btn-group">
-                <button class="btn btn-start" id="startBtn">▶ Start Camera</button>
-                <button class="btn btn-stop" id="stopBtn">⏹ Stop Camera</button>
-                <button class="btn btn-save" id="saveBtn">💾 Save Reading & Encrypt</button>
-            </div>
-            
-            <div class="instruction">
-                💡 Tip: Ensure good lighting, face centered in frame, and stay still for 10-15 seconds for accurate reading
-            </div>
+            <div class="status-text" id="statusText">Click Start Camera below to begin</div>
         </div>
         
         <script>
-            class RPPGProcessor {
-                constructor() {
-                    this.bpmHistory = [];
-                    this.redChannel = [];
-                    this.greenChannel = [];
-                    this.blueChannel = [];
-                    this.faceDetector = null;
-                    this.stream = null;
-                    this.animationId = null;
-                    this.lastBpm = null;
-                    this.quality = 0;
-                    this.frameCount = 0;
-                    this.fps = 30;
-                    this.isRunning = false;
-                    this.roiData = [];
-                }
-                
-                async initFaceDetector() {
-                    try {
-                        await tf.ready();
-                        const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
-                        const detectorConfig = { 
-                            runtime: 'tfjs', 
-                            maxFaces: 1,
-                            modelUrl: undefined
-                        };
-                        this.faceDetector = await faceDetection.createDetector(model, detectorConfig);
-                        console.log('Face detector ready');
-                        return true;
-                    } catch (err) {
-                        console.error('Face detector init error:', err);
-                        return false;
-                    }
-                }
-                
-                async startCamera() {
-                    try {
-                        this.stream = await navigator.mediaDevices.getUserMedia({ 
-                            video: { 
-                                width: { ideal: 640 },
-                                height: { ideal: 480 },
-                                frameRate: { ideal: 30 }
-                            },
-                            audio: false 
-                        });
-                        const video = document.getElementById('video');
-                        video.srcObject = this.stream;
-                        await new Promise((resolve) => {
-                            video.onloadedmetadata = () => {
-                                video.play();
-                                resolve();
-                            };
-                        });
-                        document.getElementById('faceStatus').innerHTML = '<span>✅ Camera active - Detecting face...</span>';
-                        return true;
-                    } catch (err) {
-                        console.error('Camera error:', err);
-                        document.getElementById('faceStatus').innerHTML = '<span>❌ Camera access denied. Please allow camera permissions.</span>';
-                        return false;
-                    }
-                }
-                
-                stopCamera() {
-                    this.isRunning = false;
-                    if (this.stream) {
-                        this.stream.getTracks().forEach(track => track.stop());
-                        this.stream = null;
-                    }
-                    if (this.animationId) {
-                        cancelAnimationFrame(this.animationId);
-                        this.animationId = null;
-                    }
-                    const video = document.getElementById('video');
-                    if (video) video.srcObject = null;
-                    document.getElementById('faceStatus').innerHTML = '<span>⏹ Camera stopped</span>';
-                    document.getElementById('faceOverlay').style.display = 'none';
-                    document.getElementById('roiOverlay').style.display = 'none';
-                }
-                
-                async processFrame() {
-                    if (!this.isRunning) return;
-                    
-                    const video = document.getElementById('video');
-                    if (!video || video.readyState < 2 || video.videoWidth === 0) {
-                        this.animationId = requestAnimationFrame(() => this.processFrame());
-                        return;
-                    }
-                    
-                    if (this.faceDetector) {
-                        try {
-                            const faces = await this.faceDetector.estimateFaces(video);
-                            
-                            if (faces && faces.length > 0) {
-                                const face = faces[0];
-                                const box = face.boundingBox;
-                                
-                                // Scale coordinates to video dimensions
-                                const scaleX = video.videoWidth / video.clientWidth;
-                                const scaleY = video.videoHeight / video.clientHeight;
-                                
-                                const left = box.xMin * scaleX;
-                                const top = box.yMin * scaleY;
-                                const width = (box.xMax - box.xMin) * scaleX;
-                                const height = (box.yMax - box.yMin) * scaleY;
-                                
-                                // Show face overlay
-                                const faceDiv = document.getElementById('faceOverlay');
-                                faceDiv.style.display = 'block';
-                                faceDiv.style.left = (left / scaleX) + 'px';
-                                faceDiv.style.top = (top / scaleY) + 'px';
-                                faceDiv.style.width = (width / scaleX) + 'px';
-                                faceDiv.style.height = (height / scaleY) + 'px';
-                                
-                                // Forehead ROI (upper 25% of face, centered)
-                                const roiX = left + width * 0.25;
-                                const roiY = top + height * 0.05;
-                                const roiW = width * 0.5;
-                                const roiH = height * 0.2;
-                                
-                                // Show ROI overlay
-                                const roiDiv = document.getElementById('roiOverlay');
-                                roiDiv.style.display = 'block';
-                                roiDiv.style.left = (roiX / scaleX) + 'px';
-                                roiDiv.style.top = (roiY / scaleY) + 'px';
-                                roiDiv.style.width = (roiW / scaleX) + 'px';
-                                roiDiv.style.height = (roiH / scaleY) + 'px';
-                                
-                                // Extract pixel data from ROI
-                                const tempCanvas = document.createElement('canvas');
-                                tempCanvas.width = video.videoWidth;
-                                tempCanvas.height = video.videoHeight;
-                                const ctx = tempCanvas.getContext('2d');
-                                ctx.drawImage(video, 0, 0);
-                                const imageData = ctx.getImageData(roiX, roiY, roiW, roiH);
-                                
-                                let rSum = 0, gSum = 0, bSum = 0;
-                                for (let i = 0; i < imageData.data.length; i += 4) {
-                                    rSum += imageData.data[i];
-                                    gSum += imageData.data[i+1];
-                                    bSum += imageData.data[i+2];
-                                }
-                                const pixelCount = imageData.data.length / 4;
-                                const rAvg = rSum / pixelCount;
-                                const gAvg = gSum / pixelCount;
-                                const bAvg = bSum / pixelCount;
-                                
-                                this.redChannel.push(rAvg);
-                                this.greenChannel.push(gAvg);
-                                this.blueChannel.push(bAvg);
-                                
-                                if (this.redChannel.length > 300) {
-                                    this.redChannel.shift();
-                                    this.greenChannel.shift();
-                                    this.blueChannel.shift();
-                                }
-                                
-                                document.getElementById('faceStatus').innerHTML = '<span>✅ Face detected - Analyzing pulse signal...</span>';
-                                
-                                if (this.redChannel.length >= 150 && this.frameCount % 30 === 0) {
-                                    this.computeBPM();
-                                }
-                            } else {
-                                document.getElementById('faceOverlay').style.display = 'none';
-                                document.getElementById('roiOverlay').style.display = 'none';
-                                document.getElementById('faceStatus').innerHTML = '<span>🔍 No face detected - Please look at camera</span>';
-                            }
-                        } catch(err) {
-                            console.error('Face detection error:', err);
-                        }
-                    }
-                    
-                    this.frameCount++;
-                    this.animationId = requestAnimationFrame(() => this.processFrame());
-                }
-                
-                computeBPM() {
-                    if (this.redChannel.length < 150) return;
-                    
-                    // CHROM algorithm
-                    const Xs = [];
-                    const Ys = [];
-                    const N = this.redChannel.length;
-                    
-                    for (let i = 0; i < N; i++) {
-                        const R = this.redChannel[i];
-                        const G = this.greenChannel[i];
-                        const B = this.blueChannel[i];
-                        Xs.push(R - G);
-                        Ys.push(0.5 * R + 0.5 * G - B);
-                    }
-                    
-                    // Normalize
-                    const meanX = Xs.reduce((a,b) => a+b, 0) / N;
-                    const meanY = Ys.reduce((a,b) => a+b, 0) / N;
-                    let varX = 0, varY = 0;
-                    for (let i = 0; i < N; i++) {
-                        varX += Math.pow(Xs[i] - meanX, 2);
-                        varY += Math.pow(Ys[i] - meanY, 2);
-                    }
-                    const stdX = Math.sqrt(varX / N);
-                    const stdY = Math.sqrt(varY / N);
-                    const alpha = stdX / stdY;
-                    
-                    const chromSignal = [];
-                    for (let i = 0; i < N; i++) {
-                        chromSignal.push(Xs[i] - alpha * Ys[i]);
-                    }
-                    
-                    // Simple peak detection for BPM
-                    const signal = chromSignal.slice(-150);
-                    const peaks = [];
-                    for (let i = 2; i < signal.length - 2; i++) {
-                        if (signal[i] > signal[i-1] && signal[i] > signal[i+1] &&
-                            signal[i] > signal[i-2] && signal[i] > signal[i+2]) {
-                            peaks.push(i);
-                        }
-                    }
-                    
-                    if (peaks.length >= 2) {
-                        const avgInterval = (peaks[peaks.length-1] - peaks[0]) / (peaks.length - 1);
-                        const bpm = Math.round(60 / (avgInterval / this.fps));
-                        
-                        // Calculate signal quality based on peak consistency
-                        let peakHeights = [];
-                        for (let p of peaks) {
-                            peakHeights.push(signal[p]);
-                        }
-                        const avgHeight = peakHeights.reduce((a,b) => a+b, 0) / peakHeights.length;
-                        let heightVariance = 0;
-                        for (let h of peakHeights) {
-                            heightVariance += Math.pow(h - avgHeight, 2);
-                        }
-                        heightVariance /= peakHeights.length;
-                        this.quality = Math.min(100, Math.max(0, 100 - heightVariance / avgHeight * 50));
-                        
-                        if (bpm >= 45 && bpm <= 180 && this.quality > 30) {
-                            this.lastBpm = bpm;
-                            this.bpmHistory.push(bpm);
-                            if (this.bpmHistory.length > 10) this.bpmHistory.shift();
-                            
-                            // Update UI
-                            document.getElementById('bpmValue').innerHTML = bpm;
-                            document.getElementById('qualityFill').style.width = this.quality + '%';
-                            document.getElementById('qualityText').innerHTML = `Signal Quality: ${this.quality.toFixed(1)}%`;
-                            
-                            let category = '';
-                            if (bpm < 60) category = 'Bradycardia';
-                            else if (bpm <= 100) category = 'Normal';
-                            else category = 'Tachycardia';
-                            document.getElementById('bpmCategory').innerHTML = category;
-                            
-                            const avgBpm = Math.round(this.bpmHistory.reduce((a,b) => a+b, 0) / this.bpmHistory.length);
-                            const minBpm = Math.min(...this.bpmHistory);
-                            const maxBpm = Math.max(...this.bpmHistory);
-                            document.getElementById('avgBpm').innerHTML = avgBpm;
-                            document.getElementById('minBpm').innerHTML = minBpm;
-                            document.getElementById('maxBpm').innerHTML = maxBpm;
-                            
-                            this.drawWaveform(chromSignal.slice(-200));
-                        }
-                    }
-                }
-                
-                drawWaveform(signal) {
-                    const canvas = document.getElementById('waveformCanvas');
-                    const ctx = canvas.getContext('2d');
-                    const width = canvas.clientWidth;
-                    const height = canvas.clientHeight;
-                    canvas.width = width;
-                    canvas.height = height;
-                    
-                    ctx.clearRect(0, 0, width, height);
-                    ctx.beginPath();
-                    ctx.strokeStyle = '#3b82f6';
-                    ctx.lineWidth = 2;
-                    
-                    const step = width / signal.length;
-                    for (let i = 0; i < signal.length - 1; i++) {
-                        const x1 = i * step;
-                        const y1 = height/2 - (signal[i] / 50) * height;
-                        const x2 = (i+1) * step;
-                        const y2 = height/2 - (signal[i+1] / 50) * height;
-                        ctx.beginPath();
-                        ctx.moveTo(x1, Math.max(0, Math.min(height, y1)));
-                        ctx.lineTo(x2, Math.max(0, Math.min(height, y2)));
-                        ctx.stroke();
-                    }
-                }
-                
-                async start() {
-                    this.isRunning = true;
-                    this.redChannel = [];
-                    this.greenChannel = [];
-                    this.blueChannel = [];
-                    this.bpmHistory = [];
-                    this.frameCount = 0;
-                    
-                    const detectorReady = await this.initFaceDetector();
-                    if (detectorReady) {
-                        const cameraReady = await this.startCamera();
-                        if (cameraReady) {
-                            this.processFrame();
-                        } else {
-                            this.isRunning = false;
-                        }
-                    } else {
-                        document.getElementById('faceStatus').innerHTML = '<span>⚠️ Face detection model failed to load. Please refresh.</span>';
-                        this.isRunning = false;
-                    }
-                }
-                
-                stop() {
-                    this.isRunning = false;
-                    this.stopCamera();
-                }
-                
-                getCurrentBPM() {
-                    return { bpm: this.lastBpm, quality: this.quality };
+            let video = document.getElementById('video');
+            let faceBox = document.getElementById('faceBox');
+            let roiBox = document.getElementById('roiBox');
+            let statusText = document.getElementById('statusText');
+            
+            let stream = null;
+            let animationId = null;
+            let faceDetector = null;
+            let isRunning = false;
+            
+            let redChannel = [];
+            let greenChannel = [];
+            let blueChannel = [];
+            let bpmHistory = [];
+            let lastBpm = null;
+            let quality = 0;
+            let frameCount = 0;
+            let fps = 30;
+            
+            async function initFaceDetector() {
+                try {
+                    await tf.ready();
+                    const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
+                    faceDetector = await faceDetection.createDetector(model, {
+                        runtime: 'tfjs',
+                        maxFaces: 1
+                    });
+                    return true;
+                } catch(e) {
+                    console.error('Face detector error:', e);
+                    return false;
                 }
             }
             
-            const processor = new RPPGProcessor();
+            async function startCamera() {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                        audio: false 
+                    });
+                    video.srcObject = stream;
+                    await video.play();
+                    statusText.innerHTML = '✅ Camera active - Detecting face...';
+                    return true;
+                } catch(e) {
+                    statusText.innerHTML = '❌ Camera access denied. Please allow camera permissions.';
+                    return false;
+                }
+            }
             
-            document.getElementById('startBtn').onclick = () => processor.start();
-            document.getElementById('stopBtn').onclick = () => processor.stop();
-            document.getElementById('saveBtn').onclick = () => {
-                const current = processor.getCurrentBPM();
-                if (current.bpm && current.bpm > 40 && current.bpm < 200 && current.quality > 35) {
-                    const result = { bpm: current.bpm, quality: current.quality.toFixed(1), timestamp: Date.now() };
-                    if (window.parent && window.parent.postMessage) {
+            function stopCamera() {
+                isRunning = false;
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                    animationId = null;
+                }
+                video.srcObject = null;
+                faceBox.style.display = 'none';
+                roiBox.style.display = 'none';
+                statusText.innerHTML = '⏹ Camera stopped';
+            }
+            
+            async function processFrame() {
+                if (!isRunning) return;
+                
+                if (video.readyState < 2) {
+                    animationId = requestAnimationFrame(() => processFrame());
+                    return;
+                }
+                
+                if (faceDetector) {
+                    try {
+                        const faces = await faceDetector.estimateFaces(video);
+                        
+                        if (faces && faces.length > 0) {
+                            const face = faces[0];
+                            const box = face.boundingBox;
+                            
+                            const scaleX = video.clientWidth / video.videoWidth;
+                            const scaleY = video.clientHeight / video.videoHeight;
+                            
+                            const left = box.xMin * scaleX;
+                            const top = box.yMin * scaleY;
+                            const width = (box.xMax - box.xMin) * scaleX;
+                            const height = (box.yMax - box.yMin) * scaleY;
+                            
+                            faceBox.style.display = 'block';
+                            faceBox.style.left = left + 'px';
+                            faceBox.style.top = top + 'px';
+                            faceBox.style.width = width + 'px';
+                            faceBox.style.height = height + 'px';
+                            
+                            // Forehead ROI
+                            const roiX = left + width * 0.25;
+                            const roiY = top + height * 0.05;
+                            const roiW = width * 0.5;
+                            const roiH = height * 0.2;
+                            
+                            roiBox.style.display = 'block';
+                            roiBox.style.left = roiX + 'px';
+                            roiBox.style.top = roiY + 'px';
+                            roiBox.style.width = roiW + 'px';
+                            roiBox.style.height = roiH + 'px';
+                            
+                            // Extract pixel data
+                            const tempCanvas = document.createElement('canvas');
+                            tempCanvas.width = video.videoWidth;
+                            tempCanvas.height = video.videoHeight;
+                            const ctx = tempCanvas.getContext('2d');
+                            ctx.drawImage(video, 0, 0);
+                            
+                            const imgX = box.xMin;
+                            const imgY = box.yMin;
+                            const imgW = (box.xMax - box.xMin);
+                            const imgH = (box.yMax - box.yMin);
+                            
+                            const roiImgX = imgX + imgW * 0.25;
+                            const roiImgY = imgY + imgH * 0.05;
+                            const roiImgW = imgW * 0.5;
+                            const roiImgH = imgH * 0.2;
+                            
+                            const imageData = ctx.getImageData(roiImgX, roiImgY, roiImgW, roiImgH);
+                            
+                            let rSum = 0, gSum = 0, bSum = 0;
+                            for (let i = 0; i < imageData.data.length; i += 4) {
+                                rSum += imageData.data[i];
+                                gSum += imageData.data[i+1];
+                                bSum += imageData.data[i+2];
+                            }
+                            const pixelCount = imageData.data.length / 4;
+                            const rAvg = rSum / pixelCount;
+                            const gAvg = gSum / pixelCount;
+                            const bAvg = bSum / pixelCount;
+                            
+                            redChannel.push(rAvg);
+                            greenChannel.push(gAvg);
+                            blueChannel.push(bAvg);
+                            
+                            if (redChannel.length > 300) {
+                                redChannel.shift();
+                                greenChannel.shift();
+                                blueChannel.shift();
+                            }
+                            
+                            if (redChannel.length >= 150 && frameCount % 30 === 0) {
+                                computeBPM();
+                            }
+                            
+                            statusText.innerHTML = '✅ Face detected - Analyzing pulse...';
+                        } else {
+                            faceBox.style.display = 'none';
+                            roiBox.style.display = 'none';
+                            statusText.innerHTML = '🔍 No face detected - Please look at camera';
+                        }
+                    } catch(e) {
+                        console.error('Detection error:', e);
+                    }
+                }
+                
+                frameCount++;
+                animationId = requestAnimationFrame(() => processFrame());
+            }
+            
+            function computeBPM() {
+                if (redChannel.length < 150) return;
+                
+                const N = redChannel.length;
+                const Xs = [];
+                const Ys = [];
+                
+                for (let i = 0; i < N; i++) {
+                    const R = redChannel[i];
+                    const G = greenChannel[i];
+                    const B = blueChannel[i];
+                    Xs.push(R - G);
+                    Ys.push(0.5 * R + 0.5 * G - B);
+                }
+                
+                const meanX = Xs.reduce((a,b) => a+b,0) / N;
+                const meanY = Ys.reduce((a,b) => a+b,0) / N;
+                let varX = 0, varY = 0;
+                for (let i = 0; i < N; i++) {
+                    varX += Math.pow(Xs[i] - meanX, 2);
+                    varY += Math.pow(Ys[i] - meanY, 2);
+                }
+                const alpha = Math.sqrt(varX/N) / Math.sqrt(varY/N);
+                
+                const chromSignal = [];
+                for (let i = 0; i < N; i++) {
+                    chromSignal.push(Xs[i] - alpha * Ys[i]);
+                }
+                
+                // Peak detection
+                const signal = chromSignal.slice(-150);
+                const peaks = [];
+                for (let i = 2; i < signal.length - 2; i++) {
+                    if (signal[i] > signal[i-1] && signal[i] > signal[i+1] &&
+                        signal[i] > signal[i-2] && signal[i] > signal[i+2]) {
+                        peaks.push(i);
+                    }
+                }
+                
+                if (peaks.length >= 2) {
+                    const avgInterval = (peaks[peaks.length-1] - peaks[0]) / (peaks.length - 1);
+                    const bpm = Math.round(60 / (avgInterval / fps));
+                    
+                    // Calculate quality
+                    let peakHeights = [];
+                    for (let p of peaks) peakHeights.push(signal[p]);
+                    const avgHeight = peakHeights.reduce((a,b) => a+b,0) / peakHeights.length;
+                    let heightVar = 0;
+                    for (let h of peakHeights) heightVar += Math.pow(h - avgHeight, 2);
+                    heightVar /= peakHeights.length;
+                    quality = Math.min(100, Math.max(0, 100 - (heightVar / avgHeight) * 50));
+                    
+                    if (bpm >= 45 && bpm <= 180 && quality > 30) {
+                        lastBpm = bpm;
+                        bpmHistory.push(bpm);
+                        if (bpmHistory.length > 10) bpmHistory.shift();
+                        
+                        // Send to Streamlit
+                        if (window.parent) {
+                            window.parent.postMessage({
+                                type: 'bpm_update',
+                                bpm: bpm,
+                                quality: quality
+                            }, '*');
+                        }
+                    }
+                }
+            }
+            
+            async function start() {
+                isRunning = true;
+                redChannel = [];
+                greenChannel = [];
+                blueChannel = [];
+                bpmHistory = [];
+                frameCount = 0;
+                
+                const detectorReady = await initFaceDetector();
+                if (detectorReady) {
+                    const cameraReady = await startCamera();
+                    if (cameraReady) {
+                        processFrame();
+                    } else {
+                        isRunning = false;
+                    }
+                } else {
+                    statusText.innerHTML = '⚠️ Face detection failed to load';
+                    isRunning = false;
+                }
+            }
+            
+            function stop() {
+                isRunning = false;
+                stopCamera();
+            }
+            
+            function getReading() {
+                if (lastBpm && lastBpm > 40 && lastBpm < 200 && quality > 35) {
+                    if (window.parent) {
                         window.parent.postMessage({
                             type: 'save_reading',
-                            bpm: current.bpm,
-                            quality: current.quality
+                            bpm: lastBpm,
+                            quality: quality
                         }, '*');
                     }
-                    alert(`✅ Reading saved! BPM: ${current.bpm}, Quality: ${current.quality.toFixed(1)}%`);
-                } else {
-                    let msg = '⚠️ No valid reading.\n\n';
-                    if (!current.bpm) msg += '• No BPM detected yet. Wait 10-15 seconds after camera starts.\n';
-                    else if (current.quality <= 35) msg += `• Signal quality too low (${current.quality.toFixed(1)}%). Need >35%.\n`;
-                    msg += '\nTips:\n• Ensure good lighting\n• Face centered in frame\n• Stay still for 15 seconds';
-                    alert(msg);
+                    return { bpm: lastBpm, quality: quality };
                 }
-            };
+                return null;
+            }
+            
+            // Expose functions globally
+            window.startCamera = start;
+            window.stopCamera = stop;
+            window.saveReading = getReading;
         </script>
     </body>
     </html>
     """
-    return html(rppg_html, height=580, scrolling=False)
-
-def show_encryption_simulation(bpm, quality):
-    """Display detailed encryption simulation"""
     
-    st.markdown("### 🔐 Hybrid Encryption Pipeline")
-    st.markdown("Your health data is being secured through military-grade encryption")
-    
-    health_data = {
-        "patient_id": f"PT-{st.session_state.user_id:04d}",
-        "heart_rate": bpm,
-        "signal_quality": quality,
-        "timestamp": datetime.now().isoformat(),
-        "device": "rPPG-CAM-01",
-        "user": st.session_state.username
-    }
-    
-    plaintext = json.dumps(health_data, indent=2)
-    key_hex, encrypted_payload, steps, ecc_pub, hmac_sig = encrypt_with_simulation(plaintext, bpm, quality)
-    
-    for i, step in enumerate(steps, 1):
-        with st.container():
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                st.markdown(f"### ✅")
-            with col2:
-                st.markdown(f"**Step {i}: {step['name']}**")
-                st.caption(step['description'])
-                if step['data']:
-                    st.code(step['data'], language="text")
-        st.divider()
-        time.sleep(0.2)
-    
-    st.markdown("### 📦 Encrypted Payload Preview")
-    st.markdown(f"""
-    <div class="encryption-preview">
-        <strong>🔑 AES-256 Key:</strong> {key_hex[:32]}...{key_hex[-8:]}<br>
-        <strong>🔐 ECC Public Key:</strong> {ecc_pub[:60]}...<br>
-        <strong>✍️ HMAC Signature:</strong> {hmac_sig[:32]}...<br>
-        <strong>📊 Encrypted Size:</strong> {len(encrypted_payload)} bytes<br>
-        <strong>🔗 Blockchain Hash:</strong> {hashlib.sha256(encrypted_payload.encode()).hexdigest()[:32]}...
-    </div>
-    """, unsafe_allow_html=True)
-    
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO test_results (user_id, bpm, quality, encrypted_hex, key_hex, ecc_public_key, aes_key_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (st.session_state.user_id, bpm, quality, encrypted_payload, key_hex, ecc_pub[:100], hmac_sig[:32]))
-    conn.commit()
-    conn.close()
-    
-    add_audit_log(st.session_state.user_id, "SAVE_RESULT", f"BPM: {bpm}, Quality: {quality}%, Encrypted and stored")
-    
-    st.success("✅ Data successfully encrypted with AES-256-GCM + ECC SECP256R1 and stored in 3-layer distributed storage")
-    
-    return True
+    return html(component_html, height=400, scrolling=False)
 
 def show_login():
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -974,6 +728,59 @@ def show_login():
                         finally:
                             conn.close()
 
+def show_encryption_simulation(bpm, quality):
+    st.markdown("### 🔐 Hybrid Encryption Pipeline")
+    
+    health_data = {
+        "patient_id": f"PT-{st.session_state.user_id:04d}",
+        "heart_rate": bpm,
+        "signal_quality": quality,
+        "timestamp": datetime.now().isoformat(),
+        "user": st.session_state.username
+    }
+    
+    plaintext = json.dumps(health_data, indent=2)
+    
+    steps = [
+        ("📝 Step 1: Original Data", f"Patient health data prepared for encryption", plaintext),
+        ("🔑 Step 2: AES-256 Key Generation", "Generating cryptographically secure 256-bit key", None),
+        ("🎲 Step 3: Nonce Generation", "Creating 96-bit unique nonce for GCM mode", None),
+        ("🔒 Step 4: AES-256-GCM Encryption", "Authenticated encryption with integrity tag", None),
+        ("🔐 Step 5: ECC Key Exchange", "SECP256R1 curve key pair for secure sharing", None),
+        ("✍️ Step 6: HMAC-SHA256 Signing", "Creating signature for tamper-proof verification", None),
+        ("📦 Step 7: Blockchain Storage", "Adding to immutable audit trail", None)
+    ]
+    
+    key_hex, payload, ecc_pub, hmac_sig, block_hash = encrypt_with_simulation(plaintext, bpm, quality)
+    
+    for i, (title, desc, data) in enumerate(steps, 1):
+        with st.container():
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                st.markdown(f"### {'✅' if i <= 7 else '⏳'}")
+            with col2:
+                st.markdown(f"**{title}**")
+                st.caption(desc)
+                if data:
+                    st.code(data, language="json")
+                elif i == 2:
+                    st.code(f"AES-256 Key: {key_hex[:32]}...{key_hex[-8:]}", language="text")
+                elif i == 3:
+                    st.code(f"Nonce: {secrets.token_hex(12)}", language="text")
+                elif i == 4:
+                    st.code(f"Ciphertext length: {len(payload)} bytes", language="text")
+                elif i == 5:
+                    st.code(f"ECC Public Key: {ecc_pub[:60]}...", language="text")
+                elif i == 6:
+                    st.code(f"HMAC: {hmac_sig[:32]}...", language="text")
+                elif i == 7:
+                    st.code(f"Block Hash: {block_hash[:32]}...", language="text")
+        st.divider()
+        time.sleep(0.15)
+    
+    st.success(f"✅ Data saved! BPM: {bpm}, Quality: {quality:.1f}% - Encrypted with AES-256-GCM + ECC SECP256R1")
+    return True
+
 def show_dashboard():
     with st.sidebar:
         st.markdown("<h3 style='text-align:center; color:#3b82f6;'>MedChainSecure</h3>", unsafe_allow_html=True)
@@ -1023,15 +830,12 @@ def show_dashboard():
         st.markdown("""
         <div class="glass-panel" style="margin-top: 1rem; padding: 2rem; text-align: center;">
             <h3>🎯 Real rPPG Heart Rate Monitor</h3>
-            <p>This system uses your webcam to measure heart rate remotely using the CHROM algorithm.</p>
-            <p style="font-size: 0.8rem; color: #64748b;">No physical sensors needed - just look at the camera!</p>
-            <hr>
-            <h4>🔐 Security Features</h4>
+            <p>Uses your webcam to measure heart rate remotely using the CHROM algorithm</p>
             <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem;">
-                <span class="status-badge status-good">AES-256-GCM Encryption</span>
-                <span class="status-badge status-good">ECC SECP256R1 Key Exchange</span>
-                <span class="status-badge status-good">HMAC-SHA256 Signing</span>
-                <span class="status-badge status-good">Blockchain Audit Trail</span>
+                <span class="status-badge status-good">AES-256-GCM</span>
+                <span class="status-badge status-good">ECC SECP256R1</span>
+                <span class="status-badge status-good">HMAC-SHA256</span>
+                <span class="status-badge status-good">Blockchain Audit</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1040,23 +844,86 @@ def show_dashboard():
         st.markdown("""
         <div class="main-header">
             <h2>📹 Real rPPG Heart Rate Monitor</h2>
-            <p>Position your face in the frame - system will detect forehead and calculate heart rate</p>
+            <p>Position your face in frame - system will detect forehead and calculate heart rate</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Two column layout: camera center, controls right
-        col_left, col_center, col_right = st.columns([1, 2, 1])
+        # BPM Display Card
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("""
+            <div class="bpm-card">
+                <div style="font-size: 0.875rem; opacity: 0.9;">Current Heart Rate</div>
+                <div class="bpm-value" id="streamlitBpm">--</div>
+                <div style="margin-top: 0.5rem;"><span class="status-chip" id="streamlitCategory">Waiting...</span></div>
+                <div class="quality-bar">
+                    <div class="quality-fill" id="streamlitQualityFill"></div>
+                </div>
+                <div style="font-size: 0.75rem;" id="streamlitQualityText">Signal Quality: --%</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Camera feed
+            rppg_camera_component()
+            
+            # Control buttons - These will be visible and clickable
+            col_btn1, col_btn2, col_btn3 = st.columns(3)
+            with col_btn1:
+                start_btn = st.button("▶ Start Camera", use_container_width=True, type="primary")
+            with col_btn2:
+                stop_btn = st.button("⏹ Stop Camera", use_container_width=True)
+            with col_btn3:
+                save_btn = st.button("💾 Save Reading", use_container_width=True)
+            
+            # Stats row
+            st.markdown("""
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-label">MIN BPM</div><div class="stat-value" id="streamlitMin">--</div></div>
+                <div class="stat-box"><div class="stat-label">AVG BPM</div><div class="stat-value" id="streamlitAvg">--</div></div>
+                <div class="stat-box"><div class="stat-label">MAX BPM</div><div class="stat-value" id="streamlitMax">--</div></div>
+            </div>
+            """, unsafe_allow_html=True)
         
-        with col_center:
-            st.markdown('<div style="text-align: center;">', unsafe_allow_html=True)
-            rppg_monitor_component()
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Handle saved reading
+        # JavaScript to handle button clicks and BPM updates
         st.markdown("""
         <script>
+            // Store readings
+            let currentBpm = null;
+            let currentQuality = null;
+            let bpmHistory = [];
+            
+            // Function to update display
+            function updateDisplay(bpm, quality) {
+                currentBpm = bpm;
+                currentQuality = quality;
+                document.getElementById('streamlitBpm').innerHTML = bpm;
+                document.getElementById('streamlitQualityFill').style.width = quality + '%';
+                document.getElementById('streamlitQualityText').innerHTML = `Signal Quality: ${quality.toFixed(1)}%`;
+                
+                let category = '';
+                if (bpm < 60) category = 'Bradycardia';
+                else if (bpm <= 100) category = 'Normal';
+                else category = 'Tachycardia';
+                document.getElementById('streamlitCategory').innerHTML = category;
+                
+                bpmHistory.push(bpm);
+                if (bpmHistory.length > 10) bpmHistory.shift();
+                
+                const avg = Math.round(bpmHistory.reduce((a,b)=>a+b,0)/bpmHistory.length);
+                const min = Math.min(...bpmHistory);
+                const max = Math.max(...bpmHistory);
+                
+                document.getElementById('streamlitMin').innerHTML = min;
+                document.getElementById('streamlitAvg').innerHTML = avg;
+                document.getElementById('streamlitMax').innerHTML = max;
+            }
+            
+            // Listen for messages from iframe
             window.addEventListener('message', function(event) {
-                if (event.data.type === 'save_reading') {
+                if (event.data.type === 'bpm_update') {
+                    updateDisplay(event.data.bpm, event.data.quality);
+                } else if (event.data.type === 'save_reading') {
+                    // Create form to submit to Streamlit
                     const form = document.createElement('form');
                     form.method = 'POST';
                     form.action = '';
@@ -1072,9 +939,39 @@ def show_dashboard():
                     form.submit();
                 }
             });
+            
+            // Button handlers
+            const startBtn = document.querySelector('[data-testid="baseButton-primary"]');
+            const stopBtn = document.querySelectorAll('[data-testid="baseButton-secondary"]');
+            const saveBtn = document.querySelectorAll('[data-testid="baseButton-secondary"]')[1];
+            
+            // Find the iframe
+            const iframe = document.querySelector('iframe');
+            
+            if (iframe) {
+                if (startBtn) {
+                    startBtn.onclick = () => {
+                        iframe.contentWindow.startCamera();
+                        return false;
+                    };
+                }
+                if (stopBtn && stopBtn[0]) {
+                    stopBtn[0].onclick = () => {
+                        iframe.contentWindow.stopCamera();
+                        return false;
+                    };
+                }
+                if (saveBtn) {
+                    saveBtn.onclick = () => {
+                        iframe.contentWindow.saveReading();
+                        return false;
+                    };
+                }
+            }
         </script>
         """, unsafe_allow_html=True)
         
+        # Handle saved reading
         if 'saved_bpm' in st.query_params:
             try:
                 st.session_state.saved_bpm = int(st.query_params['saved_bpm'])
@@ -1099,12 +996,12 @@ def show_dashboard():
         
         conn = sqlite3.connect('heart_monitor.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT bpm, quality, test_date, aes_key_hash FROM test_results WHERE user_id = ? ORDER BY test_date DESC', (st.session_state.user_id,))
+        cursor.execute('SELECT bpm, quality, test_date FROM test_results WHERE user_id = ? ORDER BY test_date DESC', (st.session_state.user_id,))
         results = cursor.fetchall()
         conn.close()
         
         if results:
-            df = pd.DataFrame(results, columns=['BPM', 'Quality (%)', 'Date', 'Blockchain Hash'])
+            df = pd.DataFrame(results, columns=['BPM', 'Quality (%)', 'Date'])
             df['Quality (%)'] = df['Quality (%)'].round(1)
             
             fig = go.Figure()
@@ -1114,58 +1011,25 @@ def show_dashboard():
             st.plotly_chart(fig, use_container_width=True)
             
             st.dataframe(df, use_container_width=True)
-            
-            with st.expander("🔐 View Encryption Details for Records"):
-                for idx, row in results[:5].iterrows():
-                    st.markdown(f"""
-                    <div class="glass-panel" style="margin-bottom: 0.5rem; padding: 0.75rem;">
-                        <strong>📅 {row[2]}</strong> | BPM: {row[0]} | Quality: {row[1]}%<br>
-                        <small>🔗 Blockchain Hash: {row[3] if row[3] else 'N/A'}...</small><br>
-                        <small>🔒 Encrypted with AES-256-GCM | Verified on-chain</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
             csv = df.to_csv(index=False)
-            st.download_button("📥 Export Encrypted Records (CSV)", csv, "heart_history.csv", "text/csv")
+            st.download_button("📥 Export Records (CSV)", csv, "heart_history.csv", "text/csv")
         else:
             st.info("No records yet. Use the rPPG Monitor to take your first reading.")
     
     elif selected == "Admin Panel" and st.session_state.is_admin:
-        st.markdown('<div class="main-header"><h2>⚙️ Admin Panel</h2><p>System administration and audit</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header"><h2>⚙️ Admin Panel</h2><p>System administration</p></div>', unsafe_allow_html=True)
         
-        tab1, tab2 = st.tabs(["👥 User Management", "📊 System Audit"])
+        conn = sqlite3.connect('heart_monitor.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, full_name, age, gender, COUNT(t.id) as records FROM users u LEFT JOIN test_results t ON u.id = t.user_id WHERE u.username != 'admin' GROUP BY u.id")
+        users = cursor.fetchall()
+        conn.close()
         
-        with tab1:
-            conn = sqlite3.connect('heart_monitor.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT username, full_name, age, gender, COUNT(t.id) as records FROM users u LEFT JOIN test_results t ON u.id = t.user_id WHERE u.username != 'admin' GROUP BY u.id")
-            users = cursor.fetchall()
-            conn.close()
-            
-            if users:
-                df_users = pd.DataFrame(users, columns=['Username', 'Full Name', 'Age', 'Gender', 'Records'])
-                st.dataframe(df_users, use_container_width=True)
-            else:
-                st.info("No users found.")
-        
-        with tab2:
-            conn = sqlite3.connect('heart_monitor.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT timestamp, action, details, current_hash FROM audit_log ORDER BY id DESC LIMIT 20")
-            logs = cursor.fetchall()
-            conn.close()
-            
-            for log in logs:
-                st.markdown(f"""
-                <div class="glass-panel" style="margin-bottom: 0.5rem; padding: 0.75rem;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <strong>{log[0]}</strong>
-                        <span class="status-badge status-info">{log[1]}</span>
-                    </div>
-                    <div style="font-size: 0.8rem;">{log[2]}</div>
-                    <div style="font-size: 0.6rem; font-family: monospace;">Hash: {log[3][:32]}...</div>
-                </div>
-                """, unsafe_allow_html=True)
+        if users:
+            df_users = pd.DataFrame(users, columns=['Username', 'Full Name', 'Age', 'Gender', 'Records'])
+            st.dataframe(df_users, use_container_width=True)
+        else:
+            st.info("No users found.")
 
 def main():
     if not st.session_state.authenticated:
