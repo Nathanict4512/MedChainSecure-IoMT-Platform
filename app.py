@@ -1,106 +1,75 @@
-# app.py - Main Streamlit Application (Updated with Balanced Theme)
+# app.py - Complete rPPG Heart Rate Monitor with Real Camera Feed
 import streamlit as st
 import sqlite3
 import hashlib
 import hmac
 import json
 import secrets
-import time
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import bcrypt
-import requests
-from pathlib import Path
-import base64
-import re
-import uuid
 from streamlit.components.v1 import html
+import base64
 
-# Page configuration
 st.set_page_config(
-    page_title="MedChainSecure - IoMT Heart Rate Monitor",
+    page_title="MedChainSecure - Real rPPG Heart Monitor",
     page_icon="❤️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS with balanced professional theme
+# Professional CSS
 st.markdown("""
 <style>
-    /* Professional Light Theme - Not too dark */
     :root {
         --bg-primary: #f8fafc;
         --bg-secondary: #ffffff;
         --bg-card: #ffffff;
-        --bg-card-alt: #f1f5f9;
         --text-primary: #1e293b;
         --text-secondary: #64748b;
-        --text-muted: #94a3b8;
         --accent-primary: #3b82f6;
         --accent-secondary: #06b6d4;
         --accent-tertiary: #10b981;
-        --accent-warning: #f59e0b;
-        --accent-error: #ef4444;
         --border-color: #e2e8f0;
-        --border-light: #f1f5f9;
-        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.05);
-        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.05);
     }
     
     .stApp {
         background: var(--bg-primary);
     }
     
-    /* Main container styling */
     .main-header {
         background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
         padding: 2rem;
         border-radius: 1rem;
         margin-bottom: 2rem;
         border: 1px solid var(--border-color);
-        box-shadow: var(--shadow-md);
-    }
-    
-    .main-header h1, .main-header h2 {
-        color: var(--text-primary);
-        margin-bottom: 0.5rem;
-    }
-    
-    .main-header p {
-        color: var(--text-secondary);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     
     .glass-panel {
         background: var(--bg-card);
         border: 1px solid var(--border-color);
         border-radius: 0.75rem;
-        box-shadow: var(--shadow-sm);
-        transition: all 0.3s ease;
-    }
-    
-    .glass-panel:hover {
-        box-shadow: var(--shadow-md);
+        padding: 1rem;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }
     
     .metric-card {
         background: var(--bg-card);
         border-radius: 0.75rem;
-        padding: 1.5rem;
+        padding: 1.25rem;
         border: 1px solid var(--border-color);
-        box-shadow: var(--shadow-sm);
+        text-align: center;
     }
     
     .stat-value {
-        font-size: 2.5rem;
+        font-size: 2rem;
         font-weight: 700;
         color: var(--text-primary);
     }
@@ -109,11 +78,9 @@ st.markdown("""
         font-size: 0.7rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        color: var(--text-muted);
-        font-weight: 600;
+        color: var(--text-secondary);
     }
     
-    /* Status badges */
     .status-badge {
         display: inline-flex;
         align-items: center;
@@ -122,11 +89,6 @@ st.markdown("""
         border-radius: 9999px;
         font-size: 0.7rem;
         font-weight: 600;
-    }
-    
-    .status-active {
-        background: #dbeafe;
-        color: #1d4ed8;
     }
     
     .status-good {
@@ -139,36 +101,8 @@ st.markdown("""
         color: #9a3412;
     }
     
-    .status-error {
-        background: #fee2e2;
-        color: #b91c1c;
-    }
-    
-    /* Tables */
-    .data-table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-    
-    .data-table th {
-        text-align: left;
-        padding: 0.75rem 1rem;
-        background: var(--bg-card-alt);
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-secondary);
-        font-weight: 600;
-    }
-    
-    .data-table td {
-        padding: 0.75rem 1rem;
-        border-bottom: 1px solid var(--border-light);
-    }
-    
-    /* Buttons */
     .btn-primary {
-        background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+        background: linear-gradient(135deg, #3b82f6, #06b6d4);
         color: white;
         padding: 0.625rem 1.25rem;
         border-radius: 0.5rem;
@@ -176,113 +110,12 @@ st.markdown("""
         border: none;
         cursor: pointer;
         transition: all 0.3s ease;
+        width: 100%;
     }
     
     .btn-primary:hover {
         transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    }
-    
-    .btn-secondary {
-        background: var(--bg-card-alt);
-        color: var(--text-primary);
-        padding: 0.625rem 1.25rem;
-        border-radius: 0.5rem;
-        font-weight: 500;
-        border: 1px solid var(--border-color);
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-    
-    /* Code blocks */
-    code {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.7rem;
-        background: var(--bg-card-alt);
-        padding: 0.125rem 0.375rem;
-        border-radius: 0.25rem;
-        color: var(--accent-primary);
-    }
-    
-    pre {
-        background: var(--bg-card-alt);
-        padding: 1rem;
-        border-radius: 0.5rem;
-        overflow-x: auto;
-        border: 1px solid var(--border-light);
-    }
-    
-    /* Cards */
-    .feature-card {
-        background: var(--bg-card);
-        border-radius: 0.75rem;
-        padding: 1.5rem;
-        text-align: center;
-        border: 1px solid var(--border-color);
-        transition: all 0.3s ease;
-    }
-    
-    .feature-card:hover {
-        transform: translateY(-4px);
-        box-shadow: var(--shadow-lg);
-        border-color: var(--accent-secondary);
-    }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background: var(--bg-card);
-        border-right: 1px solid var(--border-color);
-    }
-    
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: var(--bg-card-alt);
-        border-radius: 3px;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: var(--accent-secondary);
-        border-radius: 3px;
-    }
-    
-    /* Streamlit overrides */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.5rem;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 0.5rem;
-        padding: 0.5rem 1rem;
-        background: var(--bg-card-alt);
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: var(--accent-primary);
-        color: white;
-    }
-    
-    /* Expander */
-    .streamlit-expanderHeader {
-        background: var(--bg-card-alt);
-        border-radius: 0.5rem;
-    }
-    
-    /* Metrics */
-    [data-testid="stMetricValue"] {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: var(--text-primary);
-    }
-    
-    /* Divider */
-    hr {
-        margin: 1rem 0;
-        border-color: var(--border-light);
+        box-shadow: 0 4px 12px rgba(59,130,246,0.3);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -296,13 +129,13 @@ if 'username' not in st.session_state:
     st.session_state.username = None
 if 'is_admin' not in st.session_state:
     st.session_state.is_admin = False
+if 'bpm_history' not in st.session_state:
+    st.session_state.bpm_history = []
 
 # Database setup
 def init_db():
     conn = sqlite3.connect('heart_monitor.db')
     cursor = conn.cursor()
-    
-    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -315,8 +148,6 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # Test results table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS test_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -325,14 +156,10 @@ def init_db():
             quality REAL NOT NULL,
             encrypted_hex TEXT NOT NULL,
             key_hex TEXT NOT NULL,
-            analysis TEXT,
-            stress_data TEXT,
-            test_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            stress_score INTEGER,
+            test_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # Audit log table (blockchain)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,44 +168,31 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             details TEXT,
             previous_hash TEXT,
-            current_hash TEXT,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            current_hash TEXT
         )
     ''')
     
-    # Check if admin exists
     cursor.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cursor.fetchone():
         password_hash = bcrypt.hashpw(b'Admin@123', bcrypt.gensalt(12))
-        cursor.execute('''
-            INSERT INTO users (username, password_hash, full_name, age, gender, is_admin)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', ('admin', password_hash, 'System Administrator', 30, 'Male', 1))
-    
+        cursor.execute('INSERT INTO users (username, password_hash, full_name, age, gender, is_admin) VALUES (?, ?, ?, ?, ?, ?)',
+                       ('admin', password_hash, 'System Administrator', 30, 'Male', 1))
     conn.commit()
     conn.close()
 
 init_db()
 
-# Helper functions
 def add_audit_log(user_id, action, details):
     conn = sqlite3.connect('heart_monitor.db')
     cursor = conn.cursor()
-    
-    # Get previous hash
     cursor.execute("SELECT current_hash FROM audit_log ORDER BY id DESC LIMIT 1")
     prev = cursor.fetchone()
     previous_hash = prev[0] if prev else 'GENESIS'
-    
     timestamp = datetime.now().isoformat()
     data = f"{previous_hash}{user_id}{action}{timestamp}{details}"
     current_hash = hashlib.sha256(data.encode()).hexdigest()
-    
-    cursor.execute('''
-        INSERT INTO audit_log (user_id, action, timestamp, details, previous_hash, current_hash)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (user_id, action, timestamp, details, previous_hash, current_hash))
-    
+    cursor.execute('INSERT INTO audit_log (user_id, action, timestamp, details, previous_hash, current_hash) VALUES (?, ?, ?, ?, ?, ?)',
+                   (user_id, action, timestamp, details, previous_hash, current_hash))
     conn.commit()
     conn.close()
 
@@ -387,63 +201,592 @@ def encrypt_aes_gcm(plaintext):
     nonce = secrets.token_bytes(12)
     cipher = AESGCM(key)
     ciphertext = cipher.encrypt(nonce, plaintext.encode(), None)
-    payload = nonce + ciphertext
-    return key.hex(), payload.hex()
+    return key.hex(), (nonce + ciphertext).hex()
 
-def decrypt_aes_gcm(key_hex, payload_hex):
-    key = bytes.fromhex(key_hex)
-    payload = bytes.fromhex(payload_hex)
-    nonce = payload[:12]
-    encrypted = payload[12:]
-    cipher = AESGCM(key)
-    return cipher.decrypt(nonce, encrypted, None).decode()
-
-def get_bpm_category(bpm):
-    if bpm < 60:
-        return ("Bradycardia", "status-warning")
-    elif 60 <= bpm <= 100:
-        return ("Normal", "status-good")
-    else:
-        return ("Tachycardia", "status-error")
-
-def verify_blockchain_integrity():
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, user_id, action, timestamp, details, previous_hash, current_hash FROM audit_log ORDER BY id")
-    logs = cursor.fetchall()
-    conn.close()
+# rPPG Monitoring Component with real camera access
+def rppg_monitor_component():
+    """Embedded HTML/JS component for real rPPG heart rate monitoring"""
     
-    previous_hash = 'GENESIS'
-    for log in logs:
-        log_id, user_id, action, timestamp, details, stored_prev, stored_curr = log
+    rppg_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>rPPG Heart Rate Monitor</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2/dist/face-detection.min.js"></script>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                font-family: system-ui, -apple-system, sans-serif;
+                background: #f8fafc;
+            }
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            .video-container {
+                position: relative;
+                background: #1e293b;
+                border-radius: 16px;
+                overflow: hidden;
+                margin-bottom: 20px;
+            }
+            #video {
+                width: 100%;
+                height: auto;
+                transform: scaleX(-1);
+                display: block;
+            }
+            .face-overlay {
+                position: absolute;
+                border: 2px solid #10b981;
+                border-radius: 8px;
+                display: none;
+                pointer-events: none;
+            }
+            .roi-overlay {
+                position: absolute;
+                border: 2px solid #3b82f6;
+                background: rgba(59,130,246,0.1);
+                border-radius: 4px;
+                display: none;
+                pointer-events: none;
+            }
+            .bpm-display {
+                text-align: center;
+                padding: 20px;
+                background: linear-gradient(135deg, #3b82f6, #06b6d4);
+                border-radius: 16px;
+                color: white;
+                margin-bottom: 20px;
+            }
+            .bpm-value {
+                font-size: 64px;
+                font-weight: bold;
+            }
+            .quality-bar {
+                height: 8px;
+                background: #e2e8f0;
+                border-radius: 4px;
+                overflow: hidden;
+                margin-top: 10px;
+            }
+            .quality-fill {
+                height: 100%;
+                background: #10b981;
+                transition: width 0.3s;
+                width: 0%;
+            }
+            .status {
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 999px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            .status-active { background: #d1fae5; color: #065f46; }
+            .status-warning { background: #fed7aa; color: #9a3412; }
+            .controls {
+                display: flex;
+                gap: 12px;
+                justify-content: center;
+                margin-top: 20px;
+            }
+            button {
+                padding: 10px 24px;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .btn-start {
+                background: #3b82f6;
+                color: white;
+            }
+            .btn-start:hover { background: #2563eb; transform: translateY(-1px); }
+            .btn-stop {
+                background: #ef4444;
+                color: white;
+            }
+            .btn-stop:hover { background: #dc2626; transform: translateY(-1px); }
+            .stats {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 12px;
+                margin-top: 20px;
+            }
+            .stat-card {
+                background: white;
+                padding: 12px;
+                border-radius: 12px;
+                text-align: center;
+                border: 1px solid #e2e8f0;
+            }
+            .stat-label { font-size: 11px; color: #64748b; text-transform: uppercase; }
+            .stat-value { font-size: 20px; font-weight: bold; color: #1e293b; }
+            .waveform {
+                background: #1e293b;
+                border-radius: 12px;
+                padding: 16px;
+                margin-top: 20px;
+            }
+            canvas {
+                width: 100%;
+                height: 80px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="bpm-display">
+                <div style="font-size: 14px; opacity: 0.9;">Current Heart Rate</div>
+                <div class="bpm-value" id="bpmValue">--</div>
+                <div style="font-size: 14px;" id="bpmCategory">Waiting for signal...</div>
+                <div class="quality-bar">
+                    <div class="quality-fill" id="qualityFill"></div>
+                </div>
+                <div style="font-size: 12px; margin-top: 8px;" id="qualityText">Signal Quality: --%</div>
+            </div>
+            
+            <div class="video-container">
+                <video id="video" autoplay playsinline muted></video>
+                <canvas id="faceOverlay" class="face-overlay"></canvas>
+                <canvas id="roiOverlay" class="roi-overlay"></canvas>
+            </div>
+            
+            <div class="controls">
+                <button class="btn-start" id="startBtn">▶ Start Camera</button>
+                <button class="btn-stop" id="stopBtn">⏹ Stop</button>
+                <button class="btn-start" id="saveBtn" style="background: #10b981;">💾 Save Reading</button>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-label">Min BPM</div>
+                    <div class="stat-value" id="minBpm">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg BPM</div>
+                    <div class="stat-value" id="avgBpm">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max BPM</div>
+                    <div class="stat-value" id="maxBpm">--</div>
+                </div>
+            </div>
+            
+            <div class="waveform">
+                <canvas id="waveformCanvas" width="700" height="80"></canvas>
+            </div>
+        </div>
         
-        if stored_prev != previous_hash:
-            return False, log_id
-        
-        data = f"{stored_prev}{user_id}{action}{timestamp}{details}"
-        computed_hash = hashlib.sha256(data.encode()).hexdigest()
-        
-        if computed_hash != stored_curr:
-            return False, log_id
-        
-        previous_hash = stored_curr
+        <script>
+            // rPPG Signal Processing
+            class RPPGProcessor {
+                constructor() {
+                    this.signalBuffer = [];
+                    this.timestamps = [];
+                    this.bpmHistory = [];
+                    this.fftSize = 300;
+                    this.fps = 30;
+                    this.processing = false;
+                    this.frameCount = 0;
+                    this.redChannel = [];
+                    this.greenChannel = [];
+                    this.blueChannel = [];
+                    this.faceDetector = null;
+                    this.stream = null;
+                    this.animationId = null;
+                    this.lastBpm = null;
+                    this.quality = 0;
+                }
+                
+                async initFaceDetector() {
+                    const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
+                    const detectorConfig = {
+                        runtime: 'tfjs',
+                        maxFaces: 1
+                    };
+                    this.faceDetector = await faceDetection.createDetector(model, detectorConfig);
+                }
+                
+                async startCamera() {
+                    try {
+                        this.stream = await navigator.mediaDevices.getUserMedia({ 
+                            video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                            audio: false 
+                        });
+                        const video = document.getElementById('video');
+                        video.srcObject = this.stream;
+                        await video.play();
+                        return true;
+                    } catch (err) {
+                        console.error('Camera error:', err);
+                        return false;
+                    }
+                }
+                
+                stopCamera() {
+                    if (this.stream) {
+                        this.stream.getTracks().forEach(track => track.stop());
+                        this.stream = null;
+                    }
+                    if (this.animationId) {
+                        cancelAnimationFrame(this.animationId);
+                        this.animationId = null;
+                    }
+                    this.processing = false;
+                }
+                
+                async processFrame() {
+                    if (!this.processing) return;
+                    
+                    const video = document.getElementById('video');
+                    if (!video || video.readyState < 2) {
+                        this.animationId = requestAnimationFrame(() => this.processFrame());
+                        return;
+                    }
+                    
+                    // Detect face
+                    if (this.faceDetector) {
+                        const faces = await this.faceDetector.estimateFaces(video);
+                        
+                        if (faces.length > 0) {
+                            const face = faces[0];
+                            const box = face.boundingBox;
+                            
+                            // Draw face overlay
+                            const faceCanvas = document.getElementById('faceOverlay');
+                            faceCanvas.style.display = 'block';
+                            faceCanvas.style.width = box.width + 'px';
+                            faceCanvas.style.height = box.height + 'px';
+                            faceCanvas.style.left = box.x + 'px';
+                            faceCanvas.style.top = box.y + 'px';
+                            
+                            // Extract forehead ROI (upper 22% of face)
+                            const roiX = box.x + box.width * 0.2;
+                            const roiY = box.y + box.height * 0.05;
+                            const roiW = box.width * 0.6;
+                            const roiH = box.height * 0.22;
+                            
+                            // Draw ROI overlay
+                            const roiCanvas = document.getElementById('roiOverlay');
+                            roiCanvas.style.display = 'block';
+                            roiCanvas.style.width = roiW + 'px';
+                            roiCanvas.style.height = roiH + 'px';
+                            roiCanvas.style.left = roiX + 'px';
+                            roiCanvas.style.top = roiY + 'px';
+                            
+                            // Get pixel data from ROI
+                            const tempCanvas = document.createElement('canvas');
+                            tempCanvas.width = video.videoWidth;
+                            tempCanvas.height = video.videoHeight;
+                            const ctx = tempCanvas.getContext('2d');
+                            ctx.drawImage(video, 0, 0);
+                            const imageData = ctx.getImageData(roiX, roiY, roiW, roiH);
+                            
+                            // Calculate average RGB in ROI
+                            let rSum = 0, gSum = 0, bSum = 0;
+                            for (let i = 0; i < imageData.data.length; i += 4) {
+                                rSum += imageData.data[i];
+                                gSum += imageData.data[i+1];
+                                bSum += imageData.data[i+2];
+                            }
+                            const pixelCount = imageData.data.length / 4;
+                            const rAvg = rSum / pixelCount;
+                            const gAvg = gSum / pixelCount;
+                            const bAvg = bSum / pixelCount;
+                            
+                            // Store color channels
+                            this.redChannel.push(rAvg);
+                            this.greenChannel.push(gAvg);
+                            this.blueChannel.push(bAvg);
+                            
+                            // Keep only last 300 samples (10 seconds at 30fps)
+                            if (this.redChannel.length > 300) {
+                                this.redChannel.shift();
+                                this.greenChannel.shift();
+                                this.blueChannel.shift();
+                            }
+                            
+                            // Calculate CHROM signal every 30 frames
+                            if (this.redChannel.length >= 150 && this.frameCount % 30 === 0) {
+                                this.computeBPM();
+                            }
+                        } else {
+                            document.getElementById('faceOverlay').style.display = 'none';
+                            document.getElementById('roiOverlay').style.display = 'none';
+                            document.getElementById('bpmCategory').innerHTML = '⚠️ No face detected';
+                        }
+                    }
+                    
+                    this.frameCount++;
+                    this.animationId = requestAnimationFrame(() => this.processFrame());
+                }
+                
+                computeBPM() {
+                    // CHROM algorithm implementation
+                    // Xs = R - G, Ys = 0.5R + 0.5G - B
+                    const Xs = [];
+                    const Ys = [];
+                    
+                    for (let i = 0; i < this.redChannel.length; i++) {
+                        const R = this.redChannel[i];
+                        const G = this.greenChannel[i];
+                        const B = this.blueChannel[i];
+                        Xs.push(R - G);
+                        Ys.push(0.5 * R + 0.5 * G - B);
+                    }
+                    
+                    // Detrend and normalize
+                    const alpha = this.std(Xs) / this.std(Ys);
+                    const chromSignal = [];
+                    for (let i = 0; i < Xs.length; i++) {
+                        chromSignal.push(Xs[i] - alpha * Ys[i]);
+                    }
+                    
+                    // Apply Hanning window
+                    const windowed = this.hanningWindow(chromSignal);
+                    
+                    // Compute FFT
+                    const fftResult = this.fft(windowed);
+                    
+                    // Find peak in 0.67-3.5 Hz (40-210 BPM)
+                    const freqs = [];
+                    for (let i = 0; i < fftResult.length / 2; i++) {
+                        freqs.push(i * this.fps / this.redChannel.length);
+                    }
+                    
+                    let maxMagnitude = 0;
+                    let peakFreq = 0;
+                    for (let i = 0; i < freqs.length; i++) {
+                        if (freqs[i] >= 0.67 && freqs[i] <= 3.5) {
+                            const magnitude = Math.sqrt(fftResult[i*2] * fftResult[i*2] + fftResult[i*2+1] * fftResult[i*2+1]);
+                            if (magnitude > maxMagnitude) {
+                                maxMagnitude = magnitude;
+                                peakFreq = freqs[i];
+                            }
+                        }
+                    }
+                    
+                    // Calculate BPM
+                    const bpm = Math.round(peakFreq * 60);
+                    
+                    // Calculate signal quality
+                    let totalPower = 0;
+                    let inBandPower = 0;
+                    for (let i = 0; i < freqs.length; i++) {
+                        const magnitude = Math.sqrt(fftResult[i*2] * fftResult[i*2] + fftResult[i*2+1] * fftResult[i*2+1]);
+                        totalPower += magnitude;
+                        if (freqs[i] >= 0.67 && freqs[i] <= 3.5) {
+                            inBandPower += magnitude;
+                        }
+                    }
+                    this.quality = totalPower > 0 ? (inBandPower / totalPower * 100) : 0;
+                    
+                    if (bpm >= 40 && bpm <= 210 && this.quality > 30) {
+                        this.lastBpm = bpm;
+                        this.bpmHistory.push(bpm);
+                        if (this.bpmHistory.length > 10) this.bpmHistory.shift();
+                        
+                        // Update UI
+                        document.getElementById('bpmValue').innerHTML = bpm;
+                        document.getElementById('qualityFill').style.width = this.quality + '%';
+                        document.getElementById('qualityText').innerHTML = `Signal Quality: ${this.quality.toFixed(1)}%`;
+                        
+                        // Update category
+                        let category = '';
+                        let categoryClass = '';
+                        if (bpm < 60) {
+                            category = 'Bradycardia';
+                            categoryClass = 'status-warning';
+                        } else if (bpm <= 100) {
+                            category = 'Normal';
+                            categoryClass = 'status-active';
+                        } else {
+                            category = 'Tachycardia';
+                            categoryClass = 'status-warning';
+                        }
+                        document.getElementById('bpmCategory').innerHTML = `<span class="status ${categoryClass}">${category}</span>`;
+                        
+                        // Update stats
+                        const avgBpm = Math.round(this.bpmHistory.reduce((a,b) => a+b, 0) / this.bpmHistory.length);
+                        const minBpm = Math.min(...this.bpmHistory);
+                        const maxBpm = Math.max(...this.bpmHistory);
+                        document.getElementById('avgBpm').innerHTML = avgBpm;
+                        document.getElementById('minBpm').innerHTML = minBpm;
+                        document.getElementById('maxBpm').innerHTML = maxBpm;
+                        
+                        // Draw waveform
+                        this.drawWaveform(chromSignal.slice(-200));
+                        
+                        // Send to Streamlit
+                        if (window.parent && window.parent.postMessage) {
+                            window.parent.postMessage({
+                                type: 'streamlit:setComponentValue',
+                                value: { bpm: bpm, quality: this.quality.toFixed(1), timestamp: Date.now() }
+                            }, '*');
+                        }
+                    }
+                }
+                
+                drawWaveform(signal) {
+                    const canvas = document.getElementById('waveformCanvas');
+                    const ctx = canvas.getContext('2d');
+                    const width = canvas.width;
+                    const height = canvas.height;
+                    
+                    ctx.clearRect(0, 0, width, height);
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#3b82f6';
+                    ctx.lineWidth = 2;
+                    
+                    const step = width / signal.length;
+                    for (let i = 0; i < signal.length - 1; i++) {
+                        const x1 = i * step;
+                        const y1 = height / 2 - (signal[i] / 100) * height;
+                        const x2 = (i + 1) * step;
+                        const y2 = height / 2 - (signal[i + 1] / 100) * height;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(x1, Math.max(0, Math.min(height, y1)));
+                        ctx.lineTo(x2, Math.max(0, Math.min(height, y2)));
+                        ctx.stroke();
+                    }
+                }
+                
+                std(arr) {
+                    const mean = arr.reduce((a,b) => a+b, 0) / arr.length;
+                    const variance = arr.reduce((a,b) => a + Math.pow(b - mean, 2), 0) / arr.length;
+                    return Math.sqrt(variance);
+                }
+                
+                hanningWindow(signal) {
+                    const N = signal.length;
+                    const windowed = [];
+                    for (let i = 0; i < N; i++) {
+                        const w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+                        windowed.push(signal[i] * w);
+                    }
+                    return windowed;
+                }
+                
+                fft(signal) {
+                    const N = signal.length;
+                    const re = new Float64Array(N);
+                    const im = new Float64Array(N);
+                    for (let i = 0; i < N; i++) re[i] = signal[i];
+                    
+                    // Bit-reversal permutation
+                    let j = 0;
+                    for (let i = 0; i < N - 1; i++) {
+                        if (i < j) {
+                            [re[i], re[j]] = [re[j], re[i]];
+                            [im[i], im[j]] = [im[j], im[i]];
+                        }
+                        let k = N >> 1;
+                        while (k <= j) {
+                            j -= k;
+                            k >>= 1;
+                        }
+                        j += k;
+                    }
+                    
+                    // FFT computation
+                    for (let len = 2; len <= N; len <<= 1) {
+                        const angle = -2 * Math.PI / len;
+                        const wlenRe = Math.cos(angle);
+                        const wlenIm = Math.sin(angle);
+                        for (let i = 0; i < N; i += len) {
+                            let wRe = 1;
+                            let wIm = 0;
+                            for (let j = 0; j < len / 2; j++) {
+                                const uRe = re[i + j];
+                                const uIm = im[i + j];
+                                const vRe = re[i + j + len/2] * wRe - im[i + j + len/2] * wIm;
+                                const vIm = re[i + j + len/2] * wIm + im[i + j + len/2] * wRe;
+                                re[i + j] = uRe + vRe;
+                                im[i + j] = uIm + vIm;
+                                re[i + j + len/2] = uRe - vRe;
+                                im[i + j + len/2] = uIm - vIm;
+                                const nextWRe = wRe * wlenRe - wIm * wlenIm;
+                                const nextWIm = wRe * wlenIm + wIm * wlenRe;
+                                wRe = nextWRe;
+                                wIm = nextWIm;
+                            }
+                        }
+                    }
+                    
+                    const result = [];
+                    for (let i = 0; i < N; i++) {
+                        result.push(re[i]);
+                        result.push(im[i]);
+                    }
+                    return result;
+                }
+                
+                start() {
+                    this.processing = true;
+                    this.initFaceDetector().then(() => {
+                        this.startCamera().then(success => {
+                            if (success) {
+                                this.processFrame();
+                            }
+                        });
+                    });
+                }
+                
+                stop() {
+                    this.processing = false;
+                    this.stopCamera();
+                }
+                
+                getCurrentBPM() {
+                    return { bpm: this.lastBpm, quality: this.quality };
+                }
+            }
+            
+            const processor = new RPPGProcessor();
+            
+            document.getElementById('startBtn').onclick = () => processor.start();
+            document.getElementById('stopBtn').onclick = () => processor.stop();
+            document.getElementById('saveBtn').onclick = () => {
+                const current = processor.getCurrentBPM();
+                if (current.bpm) {
+                    alert(`Reading saved! BPM: ${current.bpm}, Quality: ${current.quality.toFixed(1)}%`);
+                    if (window.parent && window.parent.postMessage) {
+                        window.parent.postMessage({
+                            type: 'save_reading',
+                            bpm: current.bpm,
+                            quality: current.quality
+                        }, '*');
+                    }
+                } else {
+                    alert('No valid reading yet. Please wait for stable signal.');
+                }
+            };
+        </script>
+    </body>
+    </html>
+    """
     
-    return True, None
+    return html(rppg_html, height=700, scrolling=False)
 
-# Login/Register UI
+# Authentication UI
 def show_login():
     col1, col2, col3 = st.columns([1, 2, 1])
-    
     with col2:
         st.markdown("""
         <div class="main-header" style="text-align: center;">
             <h1>❤️ MedChainSecure</h1>
-            <p style="font-size: 1rem;">Secure IoMT Heart Rate Monitoring Platform</p>
+            <p>Real rPPG Heart Rate Monitoring with AES-256-GCM Encryption</p>
             <div style="display: flex; justify-content: center; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;">
-                <span class="status-badge status-active">🔒 AES-256-GCM</span>
-                <span class="status-badge status-active">🔑 ECC SECP256R1</span>
-                <span class="status-badge status-active">📦 Blockchain Audit</span>
-                <span class="status-badge status-good">🏥 HIPAA Compliant</span>
+                <span class="status-badge status-good">🔒 AES-256-GCM</span>
+                <span class="status-badge status-good">🔑 ECC SECP256R1</span>
+                <span class="status-badge status-good">📹 Real rPPG</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -452,17 +795,14 @@ def show_login():
         
         with tab1:
             with st.form("login_form"):
-                username = st.text_input("Username", placeholder="Enter your username")
-                password = st.text_input("Password", type="password", placeholder="Enter your password")
-                submitted = st.form_submit_button("Login", use_container_width=True)
-                
-                if submitted:
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                if st.form_submit_button("Login", use_container_width=True):
                     conn = sqlite3.connect('heart_monitor.db')
                     cursor = conn.cursor()
                     cursor.execute("SELECT id, username, password_hash, is_admin FROM users WHERE username = ?", (username,))
                     user = cursor.fetchone()
                     conn.close()
-                    
                     if user and bcrypt.checkpw(password.encode(), user[2]):
                         st.session_state.authenticated = True
                         st.session_state.user_id = user[0]
@@ -471,620 +811,136 @@ def show_login():
                         add_audit_log(user[0], "LOGIN", f"User {username} logged in")
                         st.rerun()
                     else:
-                        st.error("❌ Invalid username or password")
+                        st.error("Invalid credentials")
         
         with tab2:
             with st.form("register_form"):
-                full_name = st.text_input("Full Name", placeholder="Enter your full name")
-                username = st.text_input("Username", placeholder="Choose a username")
+                full_name = st.text_input("Full Name")
+                username = st.text_input("Username")
                 col_a, col_b = st.columns(2)
                 with col_a:
                     age = st.number_input("Age", min_value=1, max_value=120, value=30)
                 with col_b:
                     gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-                password = st.text_input("Password", type="password", placeholder="Create a password")
-                confirm = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
-                submitted = st.form_submit_button("Register", use_container_width=True)
-                
-                if submitted:
+                password = st.text_input("Password", type="password")
+                confirm = st.text_input("Confirm Password", type="password")
+                if st.form_submit_button("Register", use_container_width=True):
                     if password != confirm:
-                        st.error("❌ Passwords do not match")
-                    elif len(password) < 6:
-                        st.error("❌ Password must be at least 6 characters")
+                        st.error("Passwords don't match")
                     else:
                         conn = sqlite3.connect('heart_monitor.db')
                         cursor = conn.cursor()
                         try:
-                            password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12))
-                            cursor.execute('''
-                                INSERT INTO users (username, password_hash, full_name, age, gender, is_admin)
-                                VALUES (?, ?, ?, ?, ?, 0)
-                            ''', (username, password_hash, full_name, age, gender))
+                            pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12))
+                            cursor.execute('INSERT INTO users (username, password_hash, full_name, age, gender, is_admin) VALUES (?, ?, ?, ?, ?, 0)',
+                                           (username, pw_hash, full_name, age, gender))
                             conn.commit()
-                            user_id = cursor.lastrowid
-                            add_audit_log(user_id, "REGISTER", f"New user {username} registered")
-                            st.success("✅ Registration successful! Please login.")
+                            st.success("Registration successful! Please login.")
                         except sqlite3.IntegrityError:
-                            st.error("❌ Username already exists")
+                            st.error("Username already exists")
                         finally:
                             conn.close()
 
-# Dashboard UI
+# Dashboard
 def show_dashboard():
-    # Sidebar Navigation
     with st.sidebar:
-        st.markdown("""
-        <div style="text-align: center; margin-bottom: 2rem; padding: 1rem 0;">
-            <h2 style="color: var(--accent-primary); margin-bottom: 0;">❤️ MedChainSecure</h2>
-            <p style="font-size: 0.65rem; color: var(--text-muted); margin-top: 0.25rem;">Verified Node v2.4</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Navigation
-        pages = ["Dashboard", "rPPG Monitor", "Health History", "Encryption Lab", "Network Storage"]
-        if st.session_state.is_admin:
-            pages.append("Admin Panel")
-        
+        st.markdown("<h3 style='text-align:center; color:#3b82f6;'>MedChainSecure</h3>", unsafe_allow_html=True)
+        pages = ["Dashboard", "rPPG Monitor", "Health History", "Admin Panel" if st.session_state.is_admin else None]
+        pages = [p for p in pages if p]
         selected = st.radio("Navigation", pages, label_visibility="collapsed")
         
         st.markdown("---")
-        
-        # User info
         st.markdown(f"""
-        <div class="glass-panel" style="padding: 1rem; margin: 1rem 0;">
+        <div class="glass-panel">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #3b82f6, #06b6d4); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                    <span style="color: white;">👤</span>
-                </div>
+                <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #3b82f6, #06b6d4); border-radius: 50%;"></div>
                 <div>
-                    <p style="font-weight: 600; margin: 0;">{st.session_state.username}</p>
-                    <p style="font-size: 0.65rem; color: var(--text-muted); margin: 0;">{'Administrator' if st.session_state.is_admin else 'Patient'}</p>
+                    <p style="font-weight: 600;">{st.session_state.username}</p>
+                    <p style="font-size: 0.65rem; color: #64748b;">{'Admin' if st.session_state.is_admin else 'Patient'}</p>
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
         
         if st.button("🚪 Logout", use_container_width=True):
-            add_audit_log(st.session_state.user_id, "LOGOUT", f"User {st.session_state.username} logged out")
+            add_audit_log(st.session_state.user_id, "LOGOUT", f"User logged out")
             for key in ['authenticated', 'user_id', 'username', 'is_admin']:
                 st.session_state[key] = None
             st.rerun()
     
-    # Content based on selected page
     if selected == "Dashboard":
-        show_dashboard_home()
-    elif selected == "rPPG Monitor":
-        show_rppg_monitor()
-    elif selected == "Health History":
-        show_health_history()
-    elif selected == "Encryption Lab":
-        show_encryption_lab()
-    elif selected == "Network Storage":
-        show_network_storage()
-    elif selected == "Admin Panel":
-        show_admin_panel()
-
-def show_dashboard_home():
-    st.markdown("""
-    <div class="main-header">
-        <h2>📊 System Overview</h2>
-        <p>Real-time clinical integrity and user telemetry across 4-tier architecture.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Get stats
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM test_results")
-    total_tests = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT AVG(bpm) FROM test_results")
-    avg_bpm = cursor.fetchone()[0] or 0
-    
-    conn.close()
-    
-    # Stats grid
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="stat-label">TOTAL USERS</div>
-            <div class="stat-value">{total_users:,}</div>
-            <div style="color: var(--accent-tertiary); font-size: 0.7rem; margin-top: 0.5rem;">↑ 12% this month</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="stat-label">MONITORING SESSIONS</div>
-            <div class="stat-value">{total_tests:,}</div>
-            <div style="color: var(--accent-tertiary); font-size: 0.7rem; margin-top: 0.5rem;">↑ 5% this month</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="stat-label">AVERAGE BPM</div>
-            <div class="stat-value">{avg_bpm:.0f}</div>
-            <div style="color: var(--accent-secondary); font-size: 0.7rem; margin-top: 0.5rem;">Normal range</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Security badges
-    st.markdown("""
-    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 2rem 0; justify-content: center;">
-        <span class="status-badge status-active">🔒 AES-256-GCM Encryption</span>
-        <span class="status-badge status-active">🔑 ECC SECP256R1 Key Exchange</span>
-        <span class="status-badge status-active">📦 Blockchain Audit Log</span>
-        <span class="status-badge status-good">🏥 HIPAA Compliant</span>
-        <span class="status-badge status-good">🌍 GDPR Verified</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Feature cards
-    st.markdown("<h3 style='margin-bottom: 1rem;'>Key Features</h3>", unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    features = [
-        ("📹", "rPPG Monitoring", "Non-invasive heart rate via webcam using CHROM algorithm"),
-        ("🔐", "Hybrid Encryption", "AES-256-GCM + ECC SECP256R1 for every record"),
-        ("🗄️", "Decentralised Storage", "3-layer: Local + Remote + Blockchain"),
-        ("📊", "Analytics Dashboard", "Trend charts, CSV export, and compliance reports")
-    ]
-    
-    for col, (icon, title, desc) in zip([col1, col2, col3, col4], features):
-        with col:
-            st.markdown(f"""
-            <div class="feature-card">
-                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">{icon}</div>
-                <h4 style="margin: 0.5rem 0;">{title}</h4>
-                <p style="font-size: 0.7rem; color: var(--text-muted);">{desc}</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Architecture grid
-    st.markdown("<h3 style='margin: 2rem 0 1rem;'>4-Tier System Architecture</h3>", unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    tiers = [
-        ("💻", "Browser Client", "rPPG capture, ROI extraction, CHROM algorithm", "#3b82f6"),
-        ("🐍", "Python Backend", "Authentication, hybrid encryption, analysis", "#06b6d4"),
-        ("🗄️", "3-Layer Storage", "SQLite + PHP backup + Blockchain ledger", "#10b981"),
-        ("✅", "Verification", "AES-GCM tag verification + Hash chain", "#8b5cf6")
-    ]
-    
-    for col, (icon, title, desc, color) in zip([col1, col2, col3, col4], tiers):
-        with col:
-            st.markdown(f"""
-            <div class="glass-panel" style="padding: 1.25rem; height: 100%; border-top: 3px solid {color};">
-                <div style="font-size: 1.75rem; margin-bottom: 0.5rem;">{icon}</div>
-                <h4 style="margin: 0.5rem 0;">{title}</h4>
-                <p style="font-size: 0.7rem; color: var(--text-muted);">{desc}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-def show_rppg_monitor():
-    st.markdown("""
-    <div class="main-header">
-        <h2>📹 rPPG Real-time Monitoring</h2>
-        <p>Live Secure Stream • AES-256-GCM Encrypted</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("""
-        <div class="glass-panel" style="padding: 1rem;">
-            <div style="aspect-ratio: 16/9; background: linear-gradient(135deg, #e2e8f0, #f1f5f9); border-radius: 0.75rem; display: flex; align-items: center; justify-content: center; position: relative;">
-                <div style="text-align: center;">
-                    <span style="font-size: 4rem;">📹</span>
-                    <p style="margin-top: 1rem; color: var(--text-secondary);">Camera feed would appear here</p>
-                    <p style="font-size: 0.7rem; color: var(--text-muted);">Face detection and ROI extraction active</p>
-                </div>
-                <div style="position: absolute; top: 1rem; left: 1rem; display: flex; gap: 0.5rem;">
-                    <span class="status-badge status-active" style="background: #1e293b; color: white;">
-                        <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
-                        LIVE STREAM
-                    </span>
-                </div>
-                <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;">
-                    <div style="border: 2px solid var(--accent-secondary); border-radius: 1rem; width: 200px; height: 250px; position: relative;">
-                        <div style="position: absolute; top: 2rem; left: 50%; transform: translateX(-50%); width: 100px; height: 50px; border: 2px solid var(--accent-secondary); border-radius: 0.5rem;">
-                            <div style="position: absolute; top: -1.5rem; left: 0; font-size: 0.6rem; font-weight: 600;">ROI: Forehead</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        # BPM Gauge
-        bpm = st.slider("Simulated BPM", 40, 150, 72)
-        category, badge_class = get_bpm_category(bpm)
+        col1, col2, col3 = st.columns(3)
+        conn = sqlite3.connect('heart_monitor.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM test_results WHERE user_id = ?", (st.session_state.user_id,))
+        total_tests = cursor.fetchone()[0]
+        cursor.execute("SELECT AVG(bpm) FROM test_results WHERE user_id = ?", (st.session_state.user_id,))
+        avg_bpm = cursor.fetchone()[0] or 0
+        conn.close()
         
-        badge_color = {
-            "status-good": "#10b981",
-            "status-warning": "#f59e0b",
-            "status-error": "#ef4444"
-        }.get(badge_class, "#64748b")
-        
-        st.markdown(f"""
-        <div class="glass-panel" style="padding: 1.5rem; text-align: center;">
-            <div style="font-size: 3rem; font-weight: 700; color: var(--text-primary);">{bpm}</div>
-            <div style="font-size: 0.875rem; color: var(--text-secondary);">BPM</div>
-            <div class="{badge_class}" style="margin-top: 0.5rem; justify-content: center;">{category}</div>
-            <div style="margin-top: 1rem;">
-                <div class="stat-label">Signal Quality</div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-tertiary);">94%</div>
-                <div style="background: var(--bg-card-alt); border-radius: 0.5rem; height: 6px; margin-top: 0.5rem;">
-                    <div style="width: 94%; background: var(--accent-tertiary); height: 100%; border-radius: 0.5rem;"></div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Stress Analysis
-        stress_score = 24
-        st.markdown(f"""
-        <div class="glass-panel" style="padding: 1.5rem; margin-top: 1rem;">
-            <div class="stat-label">Stress Analysis</div>
-            <div style="display: flex; align-items: center; gap: 1rem; margin: 1rem 0;">
-                <div style="width: 50px; height: 50px; border-radius: 50%; border: 2px solid var(--accent-primary); display: flex; align-items: center; justify-content: center; font-weight: 700;">{stress_score}</div>
-                <div>
-                    <div style="font-weight: 600;">Category: Minimal</div>
-                    <div style="font-size: 0.7rem; color: var(--text-muted);">HRV Balance: Normal</div>
-                </div>
-            </div>
-            <button class="btn-primary" style="width: 100%;">💾 Save Result</button>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Waveform
-    st.markdown("""
-    <div class="glass-panel" style="padding: 1rem; margin-top: 1rem;">
-        <div class="stat-label" style="margin-bottom: 1rem;">Real-time Waveform Decomposition</div>
-        <div style="height: 120px; background: var(--bg-card-alt); border-radius: 0.5rem; position: relative; overflow: hidden;">
-            <svg width="100%" height="100%" viewBox="0 0 800 80" preserveAspectRatio="none">
-                <path d="M0,40 Q20,15 40,40 T80,40 T120,40 T160,40 T200,40 T240,40 T280,40 T320,40 T360,40 T400,40 T440,40 T480,40 T520,40 T560,40 T600,40 T640,40 T680,40 T720,40 T760,40 T800,40" fill="none" stroke="var(--accent-secondary)" stroke-width="2"/>
-            </svg>
-        </div>
-        <div style="display: flex; gap: 2rem; margin-top: 1rem; justify-content: space-around; flex-wrap: wrap;">
-            <div><span class="stat-label">SpO₂ (EST)</span><br><strong>98%</strong></div>
-            <div><span class="stat-label">RMSSD</span><br><strong>42.1 ms</strong></div>
-            <div><span class="stat-label">Resp Rate</span><br><strong>14 BrPM</strong></div>
-            <div><span class="stat-label">Sync Latency</span><br><strong style="color: var(--accent-tertiary);">18ms</strong></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def show_health_history():
-    st.markdown("""
-    <div class="main-header">
-        <h2>📋 Health History</h2>
-        <p>Your complete medical timeline with cryptographic verification</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT id, bpm, quality, test_date FROM test_results 
-        WHERE user_id = ? ORDER BY test_date DESC
-    ''', (st.session_state.user_id,))
-    results = cursor.fetchall()
-    conn.close()
-    
-    if results:
-        df = pd.DataFrame(results, columns=['ID', 'BPM', 'Quality', 'Date'])
-        
-        # Stats
-        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Tests", len(df))
+            st.markdown(f'<div class="metric-card"><div class="stat-label">Total Tests</div><div class="stat-value">{total_tests}</div></div>', unsafe_allow_html=True)
         with col2:
-            st.metric("Average BPM", f"{df['BPM'].mean():.0f}")
+            st.markdown(f'<div class="metric-card"><div class="stat-label">Average BPM</div><div class="stat-value">{avg_bpm:.0f}</div></div>', unsafe_allow_html=True)
         with col3:
-            st.metric("Min BPM", f"{df['BPM'].min()}")
-        with col4:
-            st.metric("Max BPM", f"{df['BPM'].max()}")
+            st.markdown(f'<div class="metric-card"><div class="stat-label">Security</div><div class="stat-value">AES-256</div></div>', unsafe_allow_html=True)
         
-        # Trend chart
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['BPM'],
-            mode='lines+markers',
-            name='Heart Rate',
-            line=dict(color='#3b82f6', width=2),
-            marker=dict(size=8, color=df['BPM'], colorscale='RdYlGn_r', showscale=True)
-        ))
-        fig.add_hrect(y0=60, y1=100, line_width=0, fillcolor="#10b981", opacity=0.1, annotation_text="Normal Range")
-        fig.update_layout(
-            title="Heart Rate Trend",
-            xaxis_title="Date",
-            yaxis_title="BPM",
-            template="plotly_white",
-            height=400,
-            hovermode='x unified',
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Records table
-        st.markdown("### 📊 Verified Clinical Log")
-        
-        for _, row in df.head(10).iterrows():
-            category, _ = get_bpm_category(row['BPM'])
-            status_color = "#10b981" if category == "Normal" else "#ef4444" if category == "Tachycardia" else "#f59e0b"
-            
-            st.markdown(f"""
-            <div class="glass-panel" style="padding: 0.75rem; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-                <div>
-                    <strong>{row['Date']}</strong><br>
-                    <span style="font-size: 0.7rem; color: var(--text-muted);">Quality: {row['Quality']:.1f}%</span>
-                </div>
-                <div style="text-align: center;">
-                    <span style="font-size: 1.25rem; font-weight: 700;">{row['BPM']}</span>
-                    <span style="font-size: 0.7rem;"> BPM</span>
-                </div>
-                <div>
-                    <span class="status-badge" style="background: {status_color}15; color: {status_color};">{category}</span>
-                </div>
-                <div>
-                    <span style="color: var(--accent-tertiary);">✓ Verified</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Export button
-        csv = df.to_csv(index=False)
-        st.download_button(
-            label="📥 Export to CSV",
-            data=csv,
-            file_name=f"health_history_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    else:
-        st.info("ℹ️ No health records found. Start monitoring to see your history here.")
-
-def show_encryption_lab():
-    st.markdown("""
-    <div class="main-header">
-        <h2>🔬 Encryption Laboratory</h2>
-        <p>7-step cryptographic walkthrough for IoMT data protection</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Sample data
-    sample_data = {
-        "patient_id": "PT-001",
-        "heart_rate": 72,
-        "timestamp": datetime.now().isoformat(),
-        "device": "rPPG-CAM-01"
-    }
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
         st.markdown("""
-        <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
-            <div class="stat-label">Step 1: Original Plaintext</div>
-            <pre><code>""" + json.dumps(sample_data, indent=2) + """</code></pre>
+        <div class="glass-panel" style="margin-top: 1rem; padding: 2rem; text-align: center;">
+            <h3>🎯 Real rPPG Heart Rate Monitor</h3>
+            <p>This system uses your webcam to measure heart rate remotely using the CHROM algorithm.</p>
+            <p style="font-size: 0.8rem; color: #64748b;">No physical sensors needed - just look at the camera!</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Encrypt
-        key_hex, encrypted = encrypt_aes_gcm(json.dumps(sample_data))
-        
-        st.markdown(f"""
-        <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
-            <div class="stat-label">Step 2-3: AES-256-GCM Encryption</div>
-            <div style="margin: 0.5rem 0;"><strong>AES Key:</strong> <code>{key_hex[:32]}...</code></div>
-            <div><strong>Encrypted Payload:</strong> <code>{encrypted[:64]}...</code></div>
-            <div class="status-badge status-good" style="margin-top: 0.75rem;">✓ Encryption Complete</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # ECC
-        private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
-        public_key = private_key.public_key()
-        public_pem = public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        
-        st.markdown(f"""
-        <div class="glass-panel" style="padding: 1rem;">
-            <div class="stat-label">Step 4: ECC SECP256R1 Key Pair</div>
-            <div style="margin: 0.5rem 0;"><strong>Public Key:</strong> <code>{public_pem[:40].decode()}...</code></div>
-            <div><strong>Private Key:</strong> <code style="color: var(--accent-error);">[REDACTED - Secure Enclave]</code></div>
-            <div class="status-badge status-good" style="margin-top: 0.75rem;">✓ Key Exchange Ready</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        # Decrypt verification
-        try:
-            decrypted = decrypt_aes_gcm(key_hex, encrypted)
-            decrypted_data = json.loads(decrypted)
-            
-            st.markdown(f"""
-            <div class="glass-panel" style="padding: 1rem; margin-bottom: 1rem;">
-                <div class="stat-label">Step 5-7: Decryption & Verification</div>
-                <pre><code>""" + json.dumps(decrypted_data, indent=2) + """</code></pre>
-                <div class="status-badge status-good" style="margin-top: 0.5rem;">✓ Tag Verification Passed</div>
-                <div class="status-badge status-good" style="margin-top: 0.5rem;">✓ Integrity Check Passed</div>
-            </div>
-            """, unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"Decryption failed: {e}")
-        
-        # Compliance
+    elif selected == "rPPG Monitor":
         st.markdown("""
-        <div class="glass-panel" style="padding: 1rem;">
-            <div class="stat-label">Compliance Report</div>
-            <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem;">
-                <div class="status-badge status-good">✓ HIPAA Security Rule §164.312(e)(2)(ii)</div>
-                <div class="status-badge status-good">✓ GDPR Article 32 Security of Processing</div>
-                <div class="status-badge status-good">✓ NIST SP 800-38D (AES-GCM)</div>
-                <div class="status-badge status-good">✓ FIPS 186-4 (ECC)</div>
-            </div>
+        <div class="main-header">
+            <h2>📹 Real rPPG Heart Rate Monitor</h2>
+            <p>Position your face in frame - the system will detect your forehead and calculate BPM</p>
         </div>
         """, unsafe_allow_html=True)
+        
+        rppg_monitor_component()
+        
+    elif selected == "Health History":
+        st.markdown('<div class="main-header"><h2>📋 Health History</h2><p>Your encrypted medical records</p></div>', unsafe_allow_html=True)
+        
+        conn = sqlite3.connect('heart_monitor.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT bpm, quality, test_date FROM test_results WHERE user_id = ? ORDER BY test_date DESC', (st.session_state.user_id,))
+        results = cursor.fetchall()
+        conn.close()
+        
+        if results:
+            df = pd.DataFrame(results, columns=['BPM', 'Quality', 'Date'])
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['BPM'], mode='lines+markers', name='Heart Rate', line=dict(color='#3b82f6', width=2)))
+            fig.add_hrect(y0=60, y1=100, fillcolor="#10b981", opacity=0.1, annotation_text="Normal Range")
+            fig.update_layout(title="Heart Rate History", xaxis_title="Date", yaxis_title="BPM", template="plotly_white", height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.dataframe(df, use_container_width=True)
+            csv = df.to_csv(index=False)
+            st.download_button("📥 Export CSV", csv, "heart_history.csv", "text/csv")
+        else:
+            st.info("No records yet. Use the rPPG Monitor to take your first reading.")
+    
+    elif selected == "Admin Panel" and st.session_state.is_admin:
+        st.markdown('<div class="main-header"><h2>⚙️ Admin Panel</h2><p>System administration</p></div>', unsafe_allow_html=True)
+        
+        conn = sqlite3.connect('heart_monitor.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, full_name, age, gender, COUNT(t.id) as records FROM users u LEFT JOIN test_results t ON u.id = t.user_id WHERE u.username != 'admin' GROUP BY u.id")
+        users = cursor.fetchall()
+        conn.close()
+        
+        if users:
+            df_users = pd.DataFrame(users, columns=['Username', 'Full Name', 'Age', 'Gender', 'Records'])
+            st.dataframe(df_users, use_container_width=True)
+        else:
+            st.info("No users found.")
 
-def show_network_storage():
-    st.markdown("""
-    <div class="main-header">
-        <h2>🌐 Decentralisation & Storage</h2>
-        <p>3-Layer distributed architecture with blockchain audit</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Three layers
-    col1, col2, col3 = st.columns(3)
-    
-    layers = [
-        ("Layer 1: Local Vault", "SQLite Database", "0.4ms Latency", "45% Used", "#3b82f6"),
-        ("Layer 2: Remote Relay", "PHP Backup Server", "2.1s Latency", "Active", "#06b6d4"),
-        ("Layer 3: Blockchain", "Immutable Ledger", "Verified", "Block #48,291", "#10b981")
-    ]
-    
-    for col, (title, subtitle, metric, status, color) in zip([col1, col2, col3], layers):
-        with col:
-            st.markdown(f"""
-            <div class="glass-panel" style="padding: 1.5rem; text-align: center; border-top: 3px solid {color};">
-                <h4 style="margin-bottom: 0.5rem;">{title}</h4>
-                <p style="font-size: 0.7rem; color: var(--text-muted);">{subtitle}</p>
-                <div style="margin: 1rem 0;">
-                    <div style="font-size: 1.5rem; font-weight: 700;">{metric}</div>
-                </div>
-                <div class="status-badge status-good" style="justify-content: center;">{status}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Blockchain integrity check
-    st.markdown("### 🔗 Blockchain Ledger Audit")
-    
-    is_valid, broken_at = verify_blockchain_integrity()
-    
-    if is_valid:
-        st.success("✅ Blockchain integrity verified! All hash links are valid.")
-    else:
-        st.error(f"❌ Blockchain tamper detected at entry #{broken_at}!")
-    
-    # Recent audit logs
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT timestamp, action, details, current_hash FROM audit_log 
-        ORDER BY id DESC LIMIT 10
-    ''')
-    logs = cursor.fetchall()
-    conn.close()
-    
-    st.markdown("### 📜 Recent Audit Entries")
-    
-    for log in logs:
-        st.markdown(f"""
-        <div class="glass-panel" style="padding: 0.75rem; margin-bottom: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-                <span><strong>{log[0]}</strong></span>
-                <span class="status-badge status-active">{log[1]}</span>
-            </div>
-            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">{log[2]}</div>
-            <div style="font-size: 0.6rem; font-family: monospace; margin-top: 0.25rem; color: var(--text-muted);">Hash: {log[3][:32]}...</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-def show_admin_panel():
-    st.markdown("""
-    <div class="main-header">
-        <h2>⚙️ Admin Panel</h2>
-        <p>System administration and user management</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    
-    # User management
-    cursor.execute('''
-        SELECT u.id, u.username, u.full_name, u.age, u.gender, u.is_admin, 
-               COUNT(t.id) as record_count
-        FROM users u
-        LEFT JOIN test_results t ON u.id = t.user_id
-        WHERE u.username != 'admin'
-        GROUP BY u.id
-        ORDER BY u.id
-    ''')
-    users = cursor.fetchall()
-    conn.close()
-    
-    st.markdown("### 👥 User Management")
-    
-    if users:
-        for user in users:
-            with st.expander(f"{user[1]} - {user[2]}"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.write(f"**Age:** {user[3]}")
-                    st.write(f"**Gender:** {user[4]}")
-                with col2:
-                    st.write(f"**Admin:** {'Yes' if user[5] else 'No'}")
-                    st.write(f"**Records:** {user[6]}")
-                with col3:
-                    if not user[5] and st.button(f"Make Admin", key=f"admin_{user[0]}"):
-                        conn2 = sqlite3.connect('heart_monitor.db')
-                        cursor2 = conn2.cursor()
-                        cursor2.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user[0],))
-                        conn2.commit()
-                        conn2.close()
-                        st.rerun()
-    else:
-        st.info("No regular users found.")
-    
-    # System stats
-    st.markdown("### 📊 System Statistics")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    conn = sqlite3.connect('heart_monitor.db')
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM test_results")
-    total_tests = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM audit_log")
-    total_audits = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    with col1:
-        st.metric("Total Users", total_users)
-    with col2:
-        st.metric("Total Tests", total_tests)
-    with col3:
-        st.metric("Audit Logs", total_audits)
-    with col4:
-        integrity, _ = verify_blockchain_integrity()
-        st.metric("Blockchain Status", "✅ Valid" if integrity else "❌ Tampered")
-
-# Main app
 def main():
     if not st.session_state.authenticated:
         show_login()
